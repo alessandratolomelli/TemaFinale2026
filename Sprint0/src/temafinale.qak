@@ -1,0 +1,129 @@
+System cargosystem
+
+Request load_request : loadRequest(none)
+Reply load_accepted   : loadAccepted(SLOTID) for load_request
+Reply load_retrylater : loadRetryLater(none) for load_request
+Reply load_refused    : loadRefused(none)    for load_request
+
+Context ctxcargoservice ip [host="localhost" port=8050]
+Context ctxioport       ip [host="localhost" port=8051]
+Context ctxrobot        ip [host="localhost" port=8052]
+Context ctxdevices      ip [host="localhost" port=8053]
+
+QActor cargoservice context ctxcargoservice {
+
+    State s0 initial {
+        println("cargoservice | started") color blue
+    }
+    Goto disengaged
+
+    State disengaged {
+        println("cargoservice | DISENGAGED: waiting for load_request") color green
+    }
+    Transition t0
+        whenRequest load_request -> handle_load_request
+
+    State handle_load_request {
+        println("ioport -> cargoservice | load_request: loadRequest(none)") color cyan
+
+        /*
+         * Testplan minimale:
+         *
+         * T1: richiesta accettata     -> il sistema deve passare a ENGAGED
+         * T2: richiesta rinviata      -> il sistema deve tornare/restare DISENGAGED
+         * T3: richiesta rifiutata     -> il sistema deve tornare/restare DISENGAGED
+         *
+         * Decommentare UNA sola coppia (reply + relativo Goto) alla volta.
+         */
+
+        // --- T1: accettata ---
+        println("cargoservice -> ioport | load_accepted: loadAccepted(slot1)") color green
+        replyTo load_request with load_accepted : loadAccepted(slot1)
+
+        /*
+        // --- T2: rinviata ---
+        println("cargoservice -> ioport | load_retrylater: loadRetryLater(none)") color yellow
+        replyTo load_request with load_retrylater : loadRetryLater(none)
+
+        // --- T3: rifiutata ---
+        println("cargoservice -> ioport | load_refused: loadRefused(none)") color red
+        replyTo load_request with load_refused : loadRefused(none)
+        */
+    }
+
+    // Il Goto va scelto in coerenza con il blocco reply decommentato sopra:
+    // - se attiva T1 (load_accepted)   -> Goto engaged
+    // - se attiva T2 o T3 (retrylater/refused) -> Goto disengaged
+    Goto engaged
+    // Goto disengaged   // <-- usare questa riga al posto di quella sopra per T2/T3
+
+    State engaged {
+        println("cargoservice | ENGAGED") color green
+        // TODO (prossimo sprint, vedi domande aperte al committente):
+        //  - avviare il lampeggio del led (request/reply verso l'attore led)
+        //  - attendere il segnale del sonar (container posizionato entro 30s)
+        //  - se timeout -> Goto disengaged (richiesta annullata)
+        //  - se sonar OK -> orchestrare cargorobot (IOPort->slot5, marcatura, slot5->slot riservato)
+        //  - a ciclo completato -> Goto disengaged
+    }
+}
+
+QActor ioport context ctxioport {
+
+    State s0 initial {
+        println("ioport | started") color blue
+    }
+    Goto press_button
+
+    State press_button {
+        println("customer -> ioport | pushbutton pressed") color magenta
+        println("ioport -> cargoservice | sending load_request") color cyan
+        request cargoservice -m load_request : loadRequest(none)
+    }
+    Transition t0
+        whenReply load_accepted   -> accepted
+        whenReply load_retrylater -> retrylater
+        whenReply load_refused    -> refused
+
+    State accepted {
+        println("ioport | DISPLAY: load accepted") color green
+    }
+    State retrylater {
+        println("ioport | DISPLAY: retry later") color yellow
+    }
+    State refused {
+        println("ioport | DISPLAY: load refused") color red
+    }
+}
+
+QActor cargorobot context ctxrobot {
+    State s0 initial {}
+    Goto work
+    State work {
+        println("cargorobot | WORK: move container from IOPort to slot5 and then to reserved slot") color blue
+    }
+}
+
+QActor led context ctxdevices {
+    State s0 initial {}
+    Goto work
+    State work {
+        println("led | WORK: led off or led on") color green
+    }
+}
+
+QActor markerdevice context ctxdevices {
+    State s0 initial {}
+    Goto work
+    State work {
+        println("markerdevice | WORK: marking") color yellow
+    }
+}
+
+QActor sonar context ctxdevices {
+    State s0 initial {}
+    Goto work
+    State work {
+        println("sonar | WORK: misuring...") color blue
+    }
+}
