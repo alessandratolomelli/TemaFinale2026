@@ -10,4 +10,4 @@
 
 **Documentazione**
 
-<h4><a href="INSERISCI_IL_LINK_QUI" style="color: #0066cc; text-decoration: none; font-weight: bold;">Sprint 0</a></h4>
+<h4><a href="https://github.com/alessandratolomelli/TemaFinale2026/blob/main/docs/Sprint%200.pdf" style="color: #0066cc; text-decoration: none; font-weight: bold;">Sprint 0</a></h4>
