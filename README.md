@@ -11,3 +11,7 @@
 **Documentazione**
 
 <h4><a href="https://github.com/alessandratolomelli/TemaFinale2026/blob/main/Sprint0/userDocs/Sprint%200_v0.pdf" style="color: #0066cc; text-decoration: none; font-weight: bold;">Sprint 0 v0</a></h4>
+
+<h4><a href="https://github.com/alessandratolomelli/TemaFinale2026/blob/main/Sprint0/userDocs/Sprint_0_v1.pdf" style="color: #0066cc; text-decoration: none; font-weight: bold;">Sprint 0 v1</a></h4>
+
+
