@@ -1,22 +1,40 @@
 /*
- * =============================================================
- * cargoservice.qak - Sprint1 Ibrido (FIX SINTASSI + COORDINATE)
- * =============================================================
+ * =========================================================================
+ * cargoservice.qak - Sprint 2 (Orchestrazione centralizzata su Service)
+ * =========================================================================
  */
 System cargosystem
 
-mqttBroker "192.168.0.226" : 1883   eventTopic "sprint1"  
+// Allineato all'indirizzo localhost per la connessione broker locale
+mqttBroker "localhost" : 1883   eventTopic "sprint2"  
 
-Request load_request       : loadRequest(none)
+// ===== INTERFACCIA CARGO E CONTROLLO =====
+Request load_request        : loadRequest(none)
 Reply load_accepted         : loadAccepted(SLOTID) for load_request
 Reply load_retrylater       : loadRetryLater(none) for load_request
 Reply load_refused          : loadRefused(none)    for load_request
 
-Request container_detected  : containerDetected(none)
-Reply container_ack         : containerAck(none) for container_detected
+// ===== NUOVA INTERFACCIA EVENTI E DISPATCH SONAR =====
+Dispatch container_on_platform : containerOnPlatform(none)
+Event container_detected       : containerDetected(none)
+Event load_timeout             : loadTimeout(none)
 
-Request robot_transfer     : robotTransfer(SLOT)
-Reply robot_complete        : robotComplete(FINALSLOT) for robot_transfer
+// ===== INTERFACCIA MOVIMENTI ATOMICI ROBOT =====
+Request robot_to_ioport     : robotToIoport(none)
+Reply robot_ioport_done     : robotIoportDone(none) for robot_to_ioport
+Reply robot_ioport_failed   : robotIoportFailed(ARG) for robot_to_ioport
+
+Request robot_to_slot5      : robotToSlot5(none)
+Reply robot_slot5_done      : robotSlot5Done(none) for robot_to_slot5
+Reply robot_slot5_failed    : robotSlot5Failed(ARG) for robot_to_slot5
+
+Request robot_to_slot       : robotToSlot(SLOT)
+Reply robot_slot_done       : robotSlotDone(none) for robot_to_slot
+Reply robot_slot_failed     : robotSlotFailed(ARG) for robot_to_slot
+
+// ===== INTERFACCIA MARKER DEVICE =====
+Request do_marking          : doMarking(none)
+Reply marking_done          : markingDone(none) for do_marking
 
 // ===== INTERFACCIA LOGICA HOLD =====
 Request find_free_slot      : findFreeSlot(none)
@@ -29,43 +47,29 @@ Reply occupy_done           : occupySlotDone(none) for find_occupy
 Request find_release        : releaseSlot(SLOTID)
 Reply release_done          : releaseSlotDone(none) for find_release
 
-// ===== NUOVA INTERFACCIA EVENTI E DISPATCH SONAR =====
-Dispatch container_on_platform : containerOnPlatform(none)
-Event container_detected       : containerDetected(none)
-
-// ===== DISPATCH LOGICI E DISPOSITIVI =====
+Dispatch do_blink           : do_blink(none)
 Dispatch sensor_data        : sensorData(DISTANCE)
 Dispatch led_blink          : ledBlink(STATE)
 Dispatch display_update     : displayUpdate(MESSAGE)
-Dispatch robot_complete_notification : robotCompleteNotif(FINALSLOT)
+
+Event robot_complete_notification : robotCompleteNotif(FINALSLOT)
 
 // ===== AUTODISPATCH PER GESTIONE STATI =====
 Dispatch slot_is_free       : slot_is_free(none)
 Dispatch slot_is_full       : slot_is_full(none)
 
-Dispatch sonar_normal       : sonar_normal(none)
-Dispatch sonar_warn         : sonar_warn(none)
-Dispatch sonar_alert        : sonar_alert(none)
-
 // ===== INTERFACCIA ROBOTSMART26 (ExternalQActor) =====
 Request moverobot           : moverobot(TARGETX, TARGETY, STEPTIME)
 Reply moverobotdone         : moverobotdone(ARG) for moverobot
-Reply robot_failed    		: robotFailed(ARG)   for robot_transfer
 Reply moverobotfailed       : moverobotfailed(PLANDONE, PLANTODO) for moverobot
 
-Request tuneAtHome          : tuneAtHome(X)
-Reply tuneDone              : tuneDone(X) for tuneAtHome
-Dispatch setrobotstate      : setpos(X, Y, D)
-
-// ===== CONTESTI =====
 Context ctxcargo       ip [host="localhost" port=8050]
 Context ctxrobotsmart  ip [host="127.0.0.1" port=8020]
 
 ExternalQActor robotsmart context ctxrobotsmart
 
-
 // ============================================================
-// QActor: hold - Gestione slot nella hold
+// QActor: hold - Gestione degli slot nella stiva (Hold)
 // ============================================================
 QActor hold context ctxcargo {
     [#
@@ -80,12 +84,12 @@ QActor hold context ctxcargo {
     #]
 
     State s0 initial { 
-        println("hold | started") color blue
+        println("hold | avviato") color blue
     }
     Goto idle
 
     State idle { 
-        println("hold | IDLE") color green
+        println("hold | IDLE") color green 
     }
     Transition t0
         whenRequest find_free_slot -> find_slot_logic
@@ -114,13 +118,13 @@ QActor hold context ctxcargo {
         whenMsg slot_is_full -> respond_slot_full
 
     State respond_slot_found {
-        println("hold | Responding: slot $reservedSlot found") color cyan
+        println("hold | Risposta: slot $reservedSlot trovato") color cyan
         replyTo find_free_slot with slot_found : slotFound(reservedSlot)
     }
     Goto idle
 
     State respond_slot_full {
-        println("hold | Responding: hold is FULL") color red
+        println("hold | Risposta: hold COMPLETA") color red
         replyTo find_free_slot with slot_full : slotFull(none)
     }
     Goto idle 
@@ -133,7 +137,7 @@ QActor hold context ctxcargo {
                     slots[SlotToOccupy] = "occupied" 
                 }
             #]
-            println("hold | $SlotToOccupy now OCCUPIED") color green
+            println("hold | $SlotToOccupy ora OCCUPATO") color green
             replyTo find_occupy with occupy_done : occupySlotDone(none)
         }
     }
@@ -145,13 +149,12 @@ QActor hold context ctxcargo {
                 val SlotToRelease = payloadArg(0)
                 slots[SlotToRelease] = "free" 
             #]
-            println("hold | Released $SlotToRelease") color yellow
+            println("hold | Rilasciato $SlotToRelease") color yellow
             replyTo find_release with release_done : releaseSlotDone(none)
         }
     }
     Goto idle
 }
-
 
 // ============================================================
 // QActor: cargoservice - Orchestrazione principale
@@ -159,9 +162,7 @@ QActor hold context ctxcargo {
 QActor cargoservice context ctxcargo {
     [#
         var ioPortOccupied = false
-        var systemWorking = true
         var CurrentSlot = ""
-        var canAccept = false
     #]
 
     State s0 initial {
@@ -174,21 +175,11 @@ QActor cargoservice context ctxcargo {
     }
     Transition t0
         whenRequest load_request -> handle_load_request
-        whenMsg sensor_data -> update_status
-
-    State update_status {
-        [# systemWorking = false #]
-        println("cargoservice | system OUT OF SERVICE") color red
-    }
-    Goto disengaged
 
 	State handle_load_request {
         println("ioport -> cargoservice | load request") color cyan
-        [#
-            canAccept = !ioPortOccupied && systemWorking
-        #]
     }
-    Goto request_slot if [# canAccept #] else refuse_retry_later
+    Goto request_slot if [# !ioPortOccupied #] else refuse_retry_later
 
     State request_slot {
         request hold -m find_free_slot : findFreeSlot(none)
@@ -226,25 +217,67 @@ QActor cargoservice context ctxcargo {
     Goto disengaged
 
     State engaged {
-        println("cargoservice | waiting for container") color yellow
+        println("cargoservice | Slot reserved. Waiting for container on IOPort (Max 30s)...") color yellow
         forward led -m led_blink : ledBlink(on)
     }
     Transition t2
-        whenRequest container_detected -> container_arrived
+        whenTime 30000              -> handle_timeout
+        whenEvent container_detected -> container_arrived
+
+    State handle_timeout {
+        println("cargoservice | TIMEOUT: Container non posizionato entro 30s. Rilascio lo slot...") color red
+        forward led -m led_blink : ledBlink(off)
+        emit load_timeout : loadTimeout(none)
+        request hold -m find_release : releaseSlot($CurrentSlot)
+    }
+    Transition t_timeout
+        whenReply release_done -> timeout_cleanup
+
+    State timeout_cleanup {
+        [#
+            ioPortOccupied = false
+            CurrentSlot = ""
+        #]
+        println("cargoservice | Slot rilasciato. Ritorno in attesa di richieste.") color yellow
+    }
+    Goto disengaged
 
 	State container_arrived {
-        replyTo container_detected with container_ack : containerAck(none)
-        println("cargoservice | Container detected - requesting robot transfer") color green
-        request cargorobot -m robot_transfer : robotTransfer($CurrentSlot)
+        println("cargoservice | Container detected via Sonar Event - requesting robot to IOPort") color green
+        request cargorobot -m robot_to_ioport : robotToIoport(none)
     }
     Transition t3
-        whenReply robot_complete -> on_robot_completed
+        whenReply robot_ioport_done   -> go_to_slot5
+        whenReply robot_ioport_failed -> handle_fatal_error
+
+    State go_to_slot5 {
+        println("cargoservice | Robot arrived at IOPort. Requesting movement to SLOT5 for marking") color green
+        request cargorobot -m robot_to_slot5 : robotToSlot5(none)
+    }
+    Transition t4
+        whenReply robot_slot5_done   -> request_marking_activity
+        whenReply robot_slot5_failed -> handle_fatal_error
+
+    State request_marking_activity {
+        println("cargoservice | Robot positioned on SLOT5. Requesting marking to markerdevice...") color green
+        request markerdevice -m do_marking : doMarking(none)
+    }
+    Transition t5
+        whenReply marking_done -> go_to_final_slot
+
+    State go_to_final_slot {
+        println("cargoservice | Marking completed. Requesting robot to move to reserved slot ($CurrentSlot)") color green
+        request cargorobot -m robot_to_slot : robotToSlot($CurrentSlot)
+    }
+    Transition t6
+        whenReply robot_slot_done   -> on_robot_completed
+        whenReply robot_slot_failed -> handle_fatal_error
 
 	State on_robot_completed {
         forward led -m led_blink : ledBlink(off)
         request hold -m find_occupy : occupySlot($CurrentSlot)
     }
-    Transition t4
+    Transition t7
         whenReply occupy_done -> finalize_load_ok
 
     State finalize_load_ok {
@@ -254,114 +287,20 @@ QActor cargoservice context ctxcargo {
             CurrentSlot = ""
         #]
         println("cargoservice | transfer completed and slot occupied") color green
-        forward ioport -m robot_complete_notification : robotCompleteNotif($SlotSend)
+        emit robot_complete_notification : robotCompleteNotif($SlotSend)
     }
     Goto disengaged
 
-    State timeout {
-        println("cargoservice | timeout") color red
-        request hold -m find_release : releaseSlot(CurrentSlot)
-    }
-    Transition t5
-        whenReply release_done -> finalize_timeout
-
-    State finalize_timeout {
+    State handle_fatal_error {
+        println("cargoservice | FATAL ERROR: Robot movement failed!") color red
         forward led -m led_blink : ledBlink(off)
-        [#
-            ioPortOccupied = false
-            CurrentSlot = ""
-        #]
+        [# ioPortOccupied = false #]
     }
     Goto disengaged
 }
 
-
 // ============================================================
-// QActor: ioport - Interfaccia Utente Autonoma (EX-TESTPLAN INTEGRATO)
-// ============================================================
-QActor ioport context ctxcargo {
-    [#
-        var displayMessage = "System Ready"
-    #]
-
-    State s0 initial {
-        println("ioport | STARTED - AUTO-DEMO WORKFLOW ENABLED") color blue
-    }
-    Goto delay_avvio
-
-    State delay_avvio {
-        println("ioport | In attesa che gli altri attori facciano il boot...") color magenta
-        delay 2000
-    }
-    Goto simula_pressione_bottone
-
-    State display_idle {
-        println("ioport | IDLE - Display: '$displayMessage'") color green
-        forward cargoservice -m display_update : displayUpdate(displayMessage)
-    }
-
-    State simula_pressione_bottone {
-        println("ioport | [TEST] Invio load_request a cargoservice...") color magenta
-        [# displayMessage = "Loading request..." #]
-        request cargoservice -m load_request : loadRequest(none)
-    }
-    Transition t1
-        whenReply load_accepted   -> accepted
-        whenReply load_retrylater -> retrylater
-        whenReply load_refused    -> refused
-
-	State accepted {
-	    onMsg( load_accepted : loadAccepted(SLOTID) ) {
-	        println("ioport | DISPLAY: load accepted - place container in IOPort") color green
-	        [# displayMessage = "ACCEPTED - Place container" #]
-	    }
-        println("ioport | [TEST] Container posizionato fisicamente. Attendo 3 secondi prima del check del sensore...") color magenta
-        delay 3000
-	}
-	Goto simula_rilevamento_sensore
-
-    State simula_rilevamento_sensore {
-        println("ioport | [TEST] Sensore scattato: CONTAINER DETECTED!") color green
-        request cargoservice -m container_detected : containerDetected(none)
-    }
-    Transition t2
-        whenReply container_ack -> transfer_in_progress
-
-    State retrylater {
-	    onMsg( load_retrylater : loadRetryLater(none) ) {
-	        println("ioport | DISPLAY: retry later") color yellow
-	        [# displayMessage = "RETRY LATER" #]
-	    }
-        println("ioport | [TEST] Hold momentaneamente occupata, attendo 3s e riprovo...") color magenta
-        delay 3000
-	}
-	Goto simula_pressione_bottone
-	
-	State refused {
-	    onMsg( load_refused : loadRefused(none) ) {
-	        println("ioport | DISPLAY: load refused (hold is full)") color red
-	        [# displayMessage = "REFUSED - Hold Full" #]
-	    }
-	}
-	Goto display_idle
-
-    State transfer_in_progress {
-        println("ioport | DISPLAY: Transfer in progress") color cyan
-        [# displayMessage = "Service working" #]
-    }
-    Transition t3
-        whenMsg robot_complete_notification -> transfer_complete
-
-    State transfer_complete {
-        println("ioport | DISPLAY: Transfer complete - Ready") color green
-        [# displayMessage = "Transfer complete - Ready" #]
-    }
-    Goto display_idle
-}
-
-
-// ============================================================
-// QActor: cargorobot - Gestione Movimenti
+// QActor: cargorobot - Gestione Movimenti (Wrapper di robotsmart26)
 // ============================================================
 QActor cargorobot context ctxcargo {
     [#
@@ -370,42 +309,64 @@ QActor cargorobot context ctxcargo {
     #]
 
     State s0 initial {
-        println("cargorobot | STARTED (Wrapper di robotsmart26)") color magenta
+        println("cargorobot | avviato (Wrapper di robotsmart26)") color magenta
     }
     Goto waiting
 
     State waiting {
-        println("cargorobot | waiting for robot_transfer requests...") color magenta
+        println("cargorobot | in attesa di richieste di movimento...") color magenta
     }
     Transition t0 
-        whenRequest robot_transfer -> handle_transfer
+        whenRequest robot_to_ioport -> handle_ioport
+        whenRequest robot_to_slot5  -> handle_slot5
+        whenRequest robot_to_slot   -> handle_final_slot
 
-    State handle_transfer {
-        printCurrentMessage color magenta
-        onMsg( robot_transfer : robotTransfer(SLOT) ) {
-            [# CurrentSlot = payloadArg(0).toString() #]
-            println("cargorobot | Tappa 1/3: Spostamento verso IOPort (4,1)") color magenta
-            request robotsmart -m moverobot : moverobot(4, 1, $StepTime)
-        }
+    State handle_ioport {
+        println("cargorobot | Tappa 1/3: Spostamento verso IOPort (4,1)") color magenta
+        request robotsmart -m moverobot : moverobot(4, 1, $StepTime)
     }
-    Transition t0_reply
-        whenReply moverobotdone   -> go_to_slot5
-        whenReply moverobotfailed -> handle_move_failed
+    Transition t1
+        whenReply moverobotdone   -> ioport_success
+        whenReply moverobotfailed -> ioport_failed
 
-    State go_to_slot5 {
-        println("cargorobot | Container prelevato. Tappa 2/3: Spostamento verso SLOT5 (2,5) per etichettatura") color magenta
+    State ioport_success {
+        replyTo robot_to_ioport with robot_ioport_done : robotIoportDone(none)
+    }
+    Goto waiting
+
+    State ioport_failed {
+        println("cargorobot | ERRORE FATALE: Spostamento a IOPort fallito!") color red
+        replyTo robot_to_ioport with robot_ioport_failed : robotIoportFailed(obstacle)
+    }
+    Goto waiting
+
+    State handle_slot5 {
+        println("cargorobot | Tappa 2/3: Spostamento verso SLOT5 (2,5) per etichettatura") color magenta
         request robotsmart -m moverobot : moverobot(2, 5, $StepTime)
     }
-    Transition t1_reply
-        whenReply moverobotdone   -> go_to_final_slot
-        whenReply moverobotfailed -> handle_move_failed
+    Transition t2
+        whenReply moverobotdone   -> slot5_success
+        whenReply moverobotfailed -> slot5_failed
 
-    State go_to_final_slot {
-        println("cargorobot | Etichettatura completata. Tappa 3/3: Spostamento verso lo slot riservato ($CurrentSlot)") color magenta
+    State slot5_success {
+        replyTo robot_to_slot5 with robot_slot5_done : robotSlot5Done(none)
+    }
+    Goto waiting
+
+    State slot5_failed {
+        println("cargorobot | ERRORE FATALE: Spostamento a SLOT5 fallito!") color red
+        replyTo robot_to_slot5 with robot_slot5_failed : robotSlot5Failed(obstacle)
+    }
+    Goto waiting
+
+    State handle_final_slot {
+        onMsg( robot_to_slot : robotToSlot(SLOT) ) {
+            [# CurrentSlot = payloadArg(0).toString() #]
+        }
+        println("cargorobot | Tappa 3/3: Spostamento verso lo slot riservato ($CurrentSlot)") color magenta
         [#
             var TargetX = 0
             var TargetY = 0
-        
             if(CurrentSlot == "slot1") { TargetX = 1; TargetY = 1 }
             else if(CurrentSlot == "slot2") { TargetX = 1; TargetY = 3 }
             else if(CurrentSlot == "slot3") { TargetX = 4; TargetY = 3 }
@@ -413,31 +374,30 @@ QActor cargorobot context ctxcargo {
         #]
         request robotsmart -m moverobot : moverobot($TargetX, $TargetY, $StepTime)
     }
-    Transition t2_reply
-        whenReply moverobotdone   -> complete_transfer
-        whenReply moverobotfailed -> handle_move_failed
+    Transition t3
+        whenReply moverobotdone   -> final_slot_success
+        whenReply moverobotfailed -> final_slot_failed
 
-    State complete_transfer {
+    State final_slot_success {
         println("cargorobot | Container depositato nello slot di destinazione con successo!") color magenta
-        replyTo robot_transfer with robot_complete : robotComplete(ok)
+        replyTo robot_to_slot with robot_slot_done : robotSlotDone(none)
     }
     Goto return_home
+
+    State final_slot_failed {
+        println("cargorobot | ERRORE FATALE: Spostamento allo slot di destinazione fallito!") color red
+        replyTo robot_to_slot with robot_slot_failed : robotSlotFailed(obstacle)
+    }
+    Goto waiting
 
     State return_home {
         println("cargorobot | Ritorno alla posizione HOME (0,0)") color magenta
         request robotsmart -m moverobot : moverobot(0, 0, $StepTime)
     }
-    Transition t3 
+    Transition t4 
         whenReply moverobotdone   -> waiting
         whenReply moverobotfailed -> waiting
-
-    State handle_move_failed {
-        println("cargorobot | ERRORE FATALE: Il robot ha fallito un movimento!") color red
-        replyTo robot_transfer with robot_failed : robotFailed(obstacle)
-    }
-    Goto waiting
 }
-
 
 // ============================================================
 // QActor: led - Stato del led
@@ -446,35 +406,42 @@ QActor led context ctxcargo {
     [# var ledState = "off" #]
 
     State s0 initial {
-        println("led | started - LED OFF") color blue
+        println("led | avviato - LED SPENTO") color blue
     }
     Goto off
 
     State off {
-        println("led | LED OFF") color green
+        println("led | LED SPENTO") color green
     }
     Transition t0
         whenMsg led_blink -> handle_initial_blink
 
-    State handle_initial_blink {
-        onMsg( led_blink : ledBlink(STATE) ) {
-            [# ledState = payloadArg(0) #]
-        }
-    }
-    Goto on_blink if [# ledState == "on" #] else off
 
-    State on_blink {
-        println("led | LED BLINKING (system ENGAGED)") color yellow
-    }
-    Transition t1
-        whenMsg led_blink -> handle_toggle
-
-    State handle_toggle {
-        onMsg( led_blink : ledBlink(STATE) ) {
-            [# ledState = payloadArg(0) #]
-        }
-    }
-    Goto off if [# ledState == "off" #] else on_blink
+	State handle_initial_blink {
+	    onMsg( led_blink : ledBlink(STATE) ) {
+	        [# 
+	           ledState = payloadArg(0)
+	           mqtt.publish("cargo/led/cmd", ledState)
+	        #]
+	    }
+	}
+	Goto on_blink if [# ledState == "on" #] else off
+	
+	State on_blink {
+	    println("led | LED LAMPEGGIANTE (sistema IMPEGNATO)") color yellow
+	}
+	Transition t1
+	    whenMsg led_blink -> handle_toggle
+	
+	State handle_toggle {
+	    onMsg( led_blink : ledBlink(STATE) ) {
+	        [# 
+	           ledState = payloadArg(0)
+	           mqtt.publish("cargo/led/cmd", ledState)
+	        #]
+	    }
+	}
+	Goto off if [# ledState == "off" #] else on_blink
 }
 
 // ============================================================
@@ -482,13 +449,23 @@ QActor led context ctxcargo {
 // ============================================================
 QActor markerdevice context ctxcargo {
     State s0 initial {
-        println("markerdevice | started") color blue
+        println("markerdevice | avviato") color blue
     }
     Goto idle
 
     State idle {
         println("markerdevice | idle") color green
     }
+    Transition t0
+        whenRequest do_marking -> handle_marking
+
+    State handle_marking {
+        println("markerdevice | Ricevuto comando di marcatura su SLOT5. Elaborazione barcode in corso...") color yellow
+        delay 2000
+        println("markerdevice | Marcatura completata! Barcode applicato correttamente sul container.") color green
+        replyTo do_marking with marking_done : markingDone(none)
+    }
+    Goto idle
 } 
 
 // ============================================================

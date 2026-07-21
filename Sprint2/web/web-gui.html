@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IOPort - Terminale Hardware Real-Time</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 5px rgba(34, 197, 94, 0.5); }
+            50% { box-shadow: 0 0 15px rgba(34, 197, 94, 0.9); }
+        }
+        .display-glow {
+            animation: pulse-glow 2s infinite;
+        }
+        @keyframes error-glow {
+            0%, 100% { box-shadow: 0 0 5px rgba(239, 68, 68, 0.5); }
+            50% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.9); }
+        }
+        .display-error {
+            animation: error-glow 2s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex items-center justify-center p-4" onload="autoConnect()">
+
+    <div class="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+        
+        <div class="bg-slate-800/80 px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                    <span id="headerLed" class="w-3 h-3 rounded-full bg-rose-500 animate-pulse"></span>
+                    IOPort Hardware Terminal
+                </h1>
+                <p class="text-xs text-slate-400">Interfaccia di Carico Nave (MQTT Mode + Display)</p>
+            </div>
+            <div class="text-right">
+                <span id="connLabel" class="text-xs font-bold text-rose-500 uppercase tracking-wider">Disconnesso</span>
+            </div>
+        </div>
+
+        <div class="p-6 flex flex-col gap-6">
+            
+            <!-- Display principale (ora riceve messaggi via MQTT) -->
+            <div id="displayContainer" class="bg-black border border-slate-800 rounded-xl p-5 font-mono shadow-inner display-glow relative">
+                <span class="absolute top-2 right-2 text-[10px] text-emerald-500/50 uppercase tracking-widest font-sans">LCD Display</span>
+                <div class="text-xs text-slate-500 uppercase tracking-wider mb-2 font-sans">Stato Messaggio:</div>
+                <div id="displayScreen" class="text-xl text-emerald-400 font-bold tracking-wide min-h-[2.5rem] flex items-center">
+                    Inizializzazione connessione broker...
+                </div>
+            </div>
+
+            <div class="flex flex-col items-center justify-center p-4 bg-slate-950/40 rounded-xl border border-slate-800/80">
+                <button id="btnPushbutton" onclick="onPushbuttonPressed()" disabled class="w-28 h-28 rounded-full bg-slate-800 border-4 border-slate-700 shadow-lg text-center flex flex-col items-center justify-center text-slate-500 cursor-not-allowed transition-all focus:outline-none">
+                    <span class="font-bold text-xs uppercase tracking-wider">PUSH</span>
+                    <span class="text-[10px] font-semibold mt-0.5">OFFLINE</span>
+                </button>
+                <span class="text-xs text-slate-400 mt-3 font-semibold">Pulsante di Richiesta Carico (Pushbutton)</span>
+            </div>
+
+        </div>
+
+        <div class="p-4 bg-slate-950 border-t border-slate-800/80 font-mono text-[10px]">
+            <div class="text-slate-400 uppercase font-sans font-bold tracking-wider mb-1.5 text-[11px]">Stream Eventi Network (Port 9001):</div>
+            <div id="mqttStatus" class="text-slate-500 bg-black/40 p-2 rounded h-24 overflow-y-auto flex flex-col gap-0.5">
+                Inizializzazione...
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const brokerUrl = "ws://localhost:9001";
+        let client = null;
+        let currentReservedSlot = null;
+        let msgSeqNum = 1;
+
+        function setDisplayText(text) {
+            const displayContainer = document.getElementById('displayContainer');
+            document.getElementById('displayScreen').innerText = text;
+            
+            // Cambia lo stile se il messaggio contiene "Out of service" o "ERRORE"
+            if (text.includes("Out of service") || text.includes("ERRORE") || text.includes("guasto")) {
+                displayContainer.classList.remove('display-glow');
+                displayContainer.classList.add('display-error');
+                document.getElementById('displayScreen').classList.remove('text-emerald-400');
+                document.getElementById('displayScreen').classList.add('text-red-400');
+            } else {
+                displayContainer.classList.remove('display-error');
+                displayContainer.classList.add('display-glow');
+                document.getElementById('displayScreen').classList.remove('text-red-400');
+                document.getElementById('displayScreen').classList.add('text-emerald-400');
+            }
+        }
+
+        function appendLog(text, colorClass = "text-slate-500") {
+            const log = document.getElementById('mqttStatus');
+            log.innerHTML += `<div class="${colorClass}">${text}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function autoConnect() {
+            appendLog(`Connessione automatica a ${brokerUrl}...`);
+            try {
+                client = mqtt.connect(brokerUrl);
+                
+                client.on('connect', function () {
+                    appendLog("Connesso al Broker MQTT tramite WebSocket!", "text-emerald-400");
+                    
+                    document.getElementById('headerLed').className = "w-3 h-3 rounded-full bg-emerald-500 animate-pulse";
+                    document.getElementById('connLabel').innerText = "CONNESSO";
+                    document.getElementById('connLabel').className = "text-xs font-bold text-emerald-400 uppercase tracking-wider";
+                    
+                    setDisplayText("PRONTO - Premere il pulsante per caricare");
+                    
+                    const btn = document.getElementById('btnPushbutton');
+                    btn.removeAttribute('disabled');
+                    btn.className = "w-28 h-28 rounded-full bg-rose-600 hover:bg-rose-500 border-4 border-slate-700 shadow-lg active:scale-95 active:bg-rose-700 transition-all flex flex-col items-center justify-center text-center group cursor-pointer focus:outline-none";
+                    btn.querySelector('span').innerText = "PUSH";
+                    btn.querySelectorAll('span')[1].innerText = "REQUEST";
+                    btn.querySelectorAll('span')[1].className = "text-rose-200 text-[10px] font-semibold mt-0.5";
+
+                    // ← NUOVO: sottoscrizioni ai topic di display e stato
+                    client.subscribe('sprint2/#');
+                    client.subscribe('unibo/qak/ioport');
+                    client.subscribe('cargo/display/msg');  // ← NUOVO: ascolta messaggi di display
+                });
+                
+                client.on('message', function (topic, message) {
+                    const payload = message.toString();
+                    appendLog(`[${topic}] ${payload}`, "text-slate-400");
+                    
+                    // ← NUOVO: routing per topic di display
+                    if (topic === 'cargo/display/msg') {
+                        handleDisplayMessage(payload);
+                    } else {
+                        parseIncomingMessage(payload);
+                    }
+                });
+
+                client.on('error', function (err) {
+                    appendLog(`Errore Connessione: ${err.message}`, "text-rose-500");
+                });
+
+                client.on('close', function () {
+                    appendLog("Connessione persa/chiusa dal Broker.", "text-amber-500");
+                    setDisplayText("ERRORE: BROKER SCOLLEGATO");
+                });
+
+            } catch (e) {
+                appendLog(`Eccezione: ${e.message}`, "text-rose-500");
+            }
+        }
+
+        // ← NUOVO: gestione messaggi di display dal QActor display
+        function handleDisplayMessage(payload) {
+            // Il payload è il messaggio grezzo dal sonar (es: "Out of service - Sensore guasto")
+            setDisplayText(payload);
+            appendLog(`[DISPLAY UPDATE] ${payload}`, "text-sky-300");
+        }
+
+        function buildQakMessage(msgId, msgType, sender, receiver, content) {
+            return `msg(${msgId},${msgType},${sender},${receiver},${content},${msgSeqNum++})`;
+        }
+
+        function onPushbuttonPressed() {
+            setDisplayText("INVIO RICHIESTA IN CORSO...");
+            const qakMsg = buildQakMessage("load_request", "request", "ioport", "cargoservice", "loadRequest(none)");
+            
+            if (client && client.connected) {
+                client.publish("unibo/qak/cargoservice", qakMsg);
+                appendLog(`[PUB] unibo/qak/cargoservice -> ${qakMsg}`, "text-sky-400");
+            } else {
+                setDisplayText("ERRORE: RETE ASSENTE");
+            }
+        }
+
+        function parseIncomingMessage(payload) {
+            if (payload.includes('loadAccepted')) {
+                const match = payload.match(/loadAccepted\((\w+)\)/);
+                if (match && match[1]) {
+                    currentReservedSlot = match[1];
+                    setDisplayText(`RICHIESTA ACCETTATA! RISERVATO: ${currentReservedSlot.toUpperCase()}. DEPOSITARE SU PEDANA IN 30 SECONDI.`);
+                }
+            } 
+            else if (payload.includes('loadTimeout')) {
+                setDisplayText("TIMEOUT: TEMPO SCADUTO (30s)! RICHIESTA ANNULLATA.");
+                currentReservedSlot = null;
+            }
+            else if (payload.includes('loadRetryLater')) {
+                setDisplayText("SISTEMA OCCUPATO O OUT OF SERVICE. RIPROVARE PIÙ TARDI.");
+            } 
+            else if (payload.includes('loadRefused')) {
+                setDisplayText("RICHIESTA RIFIUTATA: STIVA COMPLETA.");
+            }
+            else if (payload.includes('robotCompleteNotif')) {
+                const match = payload.match(/robotCompleteNotif\((\w+)\)/);
+                if (match && match[1]) {
+                    const slot = match[1];
+                    setDisplayText(`STIVAGGIO COMPLETATO CON SUCCESSO IN ${slot.toUpperCase()}`);
+                    currentReservedSlot = null;
+                }
+            }
+        }
+    </script>
+</body>
+</html>

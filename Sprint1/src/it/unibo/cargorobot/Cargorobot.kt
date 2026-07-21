@@ -51,7 +51,7 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t015",targetState="handle_transfer",cond=whenRequest("robot_transfer"))
+					 transition(edgeName="t018",targetState="handle_transfer",cond=whenRequest("robot_transfer"))
 				}	 
 				state("handle_transfer") { //this:State
 					action { //it:State
@@ -68,8 +68,8 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t0_reply16",targetState="go_to_slot5",cond=whenReply("moverobotdone"))
-					transition(edgeName="t0_reply17",targetState="handle_move_failed",cond=whenReply("moverobotfailed"))
+					 transition(edgeName="t0_reply19",targetState="go_to_slot5",cond=whenReply("moverobotdone"))
+					transition(edgeName="t0_reply20",targetState="handle_move_failed",cond=whenReply("moverobotfailed"))
 				}	 
 				state("go_to_slot5") { //this:State
 					action { //it:State
@@ -80,8 +80,8 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t1_reply18",targetState="go_to_final_slot",cond=whenReply("moverobotdone"))
-					transition(edgeName="t1_reply19",targetState="handle_move_failed",cond=whenReply("moverobotfailed"))
+					 transition(edgeName="t1_reply21",targetState="go_to_final_slot",cond=whenReply("moverobotdone"))
+					transition(edgeName="t1_reply22",targetState="handle_move_failed",cond=whenReply("moverobotfailed"))
 				}	 
 				state("go_to_final_slot") { //this:State
 					action { //it:State
@@ -100,8 +100,8 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t2_reply20",targetState="complete_transfer",cond=whenReply("moverobotdone"))
-					transition(edgeName="t2_reply21",targetState="handle_move_failed",cond=whenReply("moverobotfailed"))
+					 transition(edgeName="t2_reply23",targetState="complete_transfer",cond=whenReply("moverobotdone"))
+					transition(edgeName="t2_reply24",targetState="handle_move_failed",cond=whenReply("moverobotfailed"))
 				}	 
 				state("complete_transfer") { //this:State
 					action { //it:State
@@ -123,8 +123,8 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t322",targetState="waiting",cond=whenReply("moverobotdone"))
-					transition(edgeName="t323",targetState="waiting",cond=whenReply("moverobotfailed"))
+					 transition(edgeName="t325",targetState="waiting",cond=whenReply("moverobotdone"))
+					transition(edgeName="t326",targetState="waiting",cond=whenReply("moverobotfailed"))
 				}	 
 				state("handle_move_failed") { //this:State
 					action { //it:State

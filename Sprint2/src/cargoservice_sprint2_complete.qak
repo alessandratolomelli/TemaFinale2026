@@ -1,0 +1,597 @@
+/*
+
+=========================================================================
+
+cargoservice_sprint2_complete.qak - Sprint 2 (Diretto MQTT su Display)
+
+=========================================================================
+*/
+System cargosystem
+
+// Allineato a Mosquitto
+mqttBroker "localhost" : 1883   eventTopic "sprint2"
+
+// ===== INTERFACCIA CARGO E CONTROLLO =====
+Request load_request        : loadRequest(none)
+Reply load_accepted         : loadAccepted(SLOTID) for load_request
+Reply load_retrylater       : loadRetryLater(none) for load_request
+Reply load_refused          : loadRefused(none)    for load_request
+
+// ===== INTERFACCIA EVENTI E DISPATCH SONAR =====
+Event container_detected       : containerDetected(none)
+Event sonar_fault              : sonarFault(none)              // Emesso quando D > DFREE per ≥3s
+Event load_timeout             : loadTimeout(none)
+
+// ===== INTERFACCIA MOVIMENTI ATOMICI ROBOT =====
+Request robot_to_ioport     : robotToIoport(none)
+Reply robot_ioport_done     : robotIoportDone(none) for robot_to_ioport
+Reply robot_ioport_failed   : robotIoportFailed(ARG) for robot_to_ioport
+
+Request robot_to_slot5      : robotToSlot5(none)
+Reply robot_slot5_done      : robotSlot5Done(none) for robot_to_slot5
+Reply robot_slot5_failed    : robotSlot5Failed(ARG) for robot_to_slot5
+
+Request robot_to_slot       : robotToSlot(SLOT)
+Reply robot_slot_done       : robotSlotDone(none) for robot_to_slot
+Reply robot_slot_failed     : robotSlotFailed(ARG) for robot_to_slot
+
+// ===== INTERFACCIA MARKER DEVICE =====
+Request do_marking          : doMarking(none)
+Reply marking_done          : markingDone(none) for do_marking
+
+// ===== INTERFACCIA LOGICA HOLD =====
+Request find_free_slot      : findFreeSlot(none)
+Reply slot_found            : slotFound(SLOTID) for find_free_slot
+Reply slot_full             : slotFull(none)    for find_free_slot
+
+Request find_occupy         : occupySlot(SLOTID)
+Reply occupy_done           : occupySlotDone(none) for find_occupy
+
+Request find_release        : releaseSlot(SLOTID)
+Reply release_done          : releaseSlotDone(none) for find_release
+
+Dispatch do_blink           : do_blink(none)
+Dispatch sensor_data        : sensorData(DISTANCE)
+Dispatch led_blink          : ledBlink(STATE)
+
+Event robot_complete_notification : robotCompleteNotif(FINALSLOT)
+
+// ===== AUTODISPATCH PER GESTIONE STATI =====
+Dispatch slot_is_free       : slot_is_free(none)
+Dispatch slot_is_full       : slot_is_full(none)
+
+// ===== INTERFACCIA ROBOTSMART26 (ExternalQActor) =====
+Request moverobot           : moverobot(TARGETX, TARGETY, STEPTIME)
+Reply moverobotdone         : moverobotdone(ARG) for moverobot
+Reply moverobotfailed       : moverobotfailed(PLANDONE, PLANTODO) for moverobot
+
+Context ctxcargo       ip [host="localhost" port=8050]
+Context ctxrobotsmart  ip [host="127.0.0.1" port=8020]
+
+ExternalQActor robotsmart context ctxrobotsmart
+
+// ============================================================
+// QActor: hold - Gestione degli slot nella stiva (Hold)
+// ============================================================
+QActor hold context ctxcargo {
+[#
+val slots = mutableMapOf(
+"slot1" to "free",
+"slot2" to "free",
+"slot3" to "free",
+"slot4" to "free"
+)
+var ReservedSlot = ""
+var slotIsAvailable = false
+#]
+
+State s0 initial { 
+    println("hold | avviato") color blue
+}
+Goto idle
+
+State idle { 
+    println("hold | IDLE") color green 
+}
+Transition t0
+    whenRequest find_free_slot -> find_slot_logic
+    whenRequest find_occupy    -> occupy_slot
+    whenRequest find_release   -> free_slot
+
+State find_slot_logic {
+    [#
+        val freeSlot = slots.filter { it.value == "free" }.keys.firstOrNull()
+        slotIsAvailable = freeSlot != null
+        if (slotIsAvailable) {
+            slots[freeSlot!!] = "reserved"
+            ReservedSlot = freeSlot!!
+        } else {
+            ReservedSlot = ""
+        }
+    #]
+    if [# slotIsAvailable #] {
+        forward hold -m slot_is_free : slot_is_free(none)
+    } else {
+        forward hold -m slot_is_full : slot_is_full(none)
+    }
+}
+Transition t0b
+    whenMsg slot_is_free -> respond_slot_found
+    whenMsg slot_is_full -> respond_slot_full
+
+State respond_slot_found {
+    println("hold | Risposta: slot $ReservedSlot trovato") color cyan
+    [# 
+        val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
+        mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
+    #]
+    replyTo find_free_slot with slot_found : slotFound($ReservedSlot)
+}
+Goto idle
+
+State respond_slot_full {
+    println("hold | Risposta: hold COMPLETA") color red
+    [# 
+        val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
+        mqtt.publish("cargo/display/msg", "Hold: $holdStatus (PIENA)")
+    #]
+    replyTo find_free_slot with slot_full : slotFull(none)
+}
+Goto idle 
+
+State occupy_slot {
+    onMsg( find_occupy : occupySlot(SLOTID) ) {
+        [# 
+            val SlotToOccupy = payloadArg(0).toString()
+            if (slots[SlotToOccupy] == "reserved" || slots[SlotToOccupy] == "free") {
+                slots[SlotToOccupy] = "occupied" 
+            }
+            val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
+            mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
+        #]
+        println("hold | $SlotToOccupy ora OCCUPATO") color green
+        replyTo find_occupy with occupy_done : occupySlotDone(none)
+    }
+}
+Goto idle
+
+State free_slot {
+    onMsg( find_release : releaseSlot(SLOTID) ) {
+        [# 
+            val SlotToRelease = payloadArg(0).toString()
+            slots[SlotToRelease] = "free" 
+            val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
+            mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
+        #]
+        println("hold | Rilasciato $SlotToRelease") color yellow
+        replyTo find_release with release_done : releaseSlotDone(none)
+    }
+}
+Goto idle
+
+
+}
+
+// ============================================================
+// QActor: cargoservice - Orchestrazione principale con OOS
+// ============================================================
+QActor cargoservice context ctxcargo {
+[#
+var ioPortOccupied = false
+var CurrentSlot = ""
+var systemOutOfService = false
+#]
+
+State s0 initial {
+    println("cargoservice | started") color blue
+    [# mqtt.publish("cargo/display/msg", "Inizializzazione...") #]
+}
+Goto disengaged
+
+State disengaged {
+    println("cargoservice | waiting for load request") color green
+    if [# !systemOutOfService #] {
+        [# mqtt.publish("cargo/display/msg", "Service working - Pronto per carico") #]
+    }
+}
+Transition t0
+    whenRequest load_request -> handle_load_request
+    whenEvent sonar_fault    -> mark_out_of_service
+
+State mark_out_of_service {
+    println("cargoservice | ⚠️  SONAR FAULT: Sistema OUT OF SERVICE") color red
+    [# 
+        systemOutOfService = true 
+        mqtt.publish("cargo/display/msg", "Out of service - Sensore guasto")
+    #]
+}
+Goto disengaged
+
+State handle_load_request {
+    println("ioport -> cargoservice | load request") color cyan
+}
+Goto request_slot if [# !ioPortOccupied && !systemOutOfService #] else refuse_retry_later
+
+State request_slot {
+    request hold -m find_free_slot : findFreeSlot(none)
+}
+Goto waiting_for_slot
+
+State refuse_retry_later {
+    if [# systemOutOfService #] {
+        println("cargoservice | Rifiuto per OUT OF SERVICE") color red
+        [# mqtt.publish("cargo/display/msg", "Sistema OOS - Riprova più tardi") #]
+    } else {
+        println("cargoservice | Rifiuto per IOPort occupata") color yellow
+        [# mqtt.publish("cargo/display/msg", "IOPort occupato - Riprova più tardi") #]
+    }
+    replyTo load_request with load_retrylater : loadRetryLater(none)
+}
+Goto disengaged
+
+State waiting_for_slot {
+    println("cargoservice | waiting for slot response") color cyan
+}
+Transition t1
+    whenReply slot_found -> slot_available
+    whenReply slot_full  -> hold_is_full
+
+State slot_available {
+    onMsg( slot_found : slotFound(SLOTID) ) {
+        [#
+            CurrentSlot = payloadArg(0).toString()
+            ioPortOccupied = true
+            mqtt.publish("cargo/display/msg", "Richiesta accettata - Slot: $CurrentSlot")
+        #]
+        println("cargoservice | reserved $CurrentSlot") color green
+        replyTo load_request with load_accepted : loadAccepted($CurrentSlot)
+    }
+}
+Goto engaged
+
+State hold_is_full {
+    println("cargoservice | hold is full") color red
+    [# mqtt.publish("cargo/display/msg", "Stiva completa - Richiesta rifiutata") #]
+    replyTo load_request with load_refused : loadRefused(none)
+}
+Goto disengaged
+
+State engaged {
+    println("cargoservice | Slot reserved. Waiting for container on IOPort (Max 30s)...") color yellow
+    forward led -m led_blink : ledBlink(on)
+    [# mqtt.publish("cargo/display/msg", "Service working - LED acceso, attesa container") #]
+}
+Transition t2
+    whenTime 30000              -> handle_timeout
+    whenEvent container_detected -> container_arrived
+
+State handle_timeout {
+    println("cargoservice | TIMEOUT: Container non posizionato entro 30s. Rilascio lo slot...") color red
+    forward led -m led_blink : ledBlink(off)
+    [# mqtt.publish("cargo/display/msg", "Timeout! Slot $CurrentSlot rilasciato") #]
+    emit load_timeout : loadTimeout(none)
+    request hold -m find_release : releaseSlot($CurrentSlot)
+}
+Transition t_timeout
+    whenReply release_done -> timeout_cleanup
+
+State timeout_cleanup {
+    [#
+        ioPortOccupied = false
+        CurrentSlot = ""
+        mqtt.publish("cargo/display/msg", "Pronto per nuovo carico")
+    #]
+    println("cargoservice | Slot rilasciato. Ritorno in attesa di richieste.") color yellow
+}
+Goto disengaged
+
+State container_arrived {
+    println("cargoservice | Container detected via Sonar Event - requesting robot to IOPort") color green
+    [# mqtt.publish("cargo/display/msg", "Container rilevato! Robot in movimento...") #]
+    request cargorobot -m robot_to_ioport : robotToIoport(none)
+}
+Transition t3
+    whenReply robot_ioport_done   -> go_to_slot5
+    whenReply robot_ioport_failed -> handle_fatal_error
+
+State go_to_slot5 {
+    println("cargoservice | Robot arrived at IOPort. Requesting movement to SLOT5 for marking") color green
+    [# mqtt.publish("cargo/display/msg", "Robot a IOPort - Movimento a SLOT5...") #]
+    request cargorobot -m robot_to_slot5 : robotToSlot5(none)
+}
+Transition t4
+    whenReply robot_slot5_done   -> request_marking_activity
+    whenReply robot_slot5_failed -> handle_fatal_error
+
+State request_marking_activity {
+    println("cargoservice | Robot positioned on SLOT5. Requesting marking to markerdevice...") color green
+    [# mqtt.publish("cargo/display/msg", "Marcatura in corso...") #]
+    request markerdevice -m do_marking : doMarking(none)
+}
+Transition t5
+    whenReply marking_done -> go_to_final_slot
+
+State go_to_final_slot {
+    println("cargoservice | Marking completed. Requesting robot to move to reserved slot ($CurrentSlot)") color green
+    [# mqtt.publish("cargo/display/msg", "Marcatura ok - Movimento a $CurrentSlot...") #]
+    request cargorobot -m robot_to_slot : robotToSlot($CurrentSlot)
+}
+Transition t6
+    whenReply robot_slot_done   -> on_robot_completed
+    whenReply robot_slot_failed -> handle_fatal_error
+
+State on_robot_completed {
+    forward led -m led_blink : ledBlink(off)
+    [# mqtt.publish("cargo/display/msg", "Robot deposita in $CurrentSlot...") #]
+    request hold -m find_occupy : occupySlot($CurrentSlot)
+}
+Transition t7
+    whenReply occupy_done -> finalize_load_ok
+
+State finalize_load_ok {
+    [#
+        ioPortOccupied = false
+        var SlotSend = CurrentSlot
+        CurrentSlot = ""
+        mqtt.publish("cargo/display/msg", "Stivaggio completato in $SlotSend!")
+    #]
+    println("cargoservice | transfer completed and slot occupied") color green
+    emit robot_complete_notification : robotCompleteNotif($SlotSend)
+}
+Goto disengaged
+
+State handle_fatal_error {
+    println("cargoservice | FATAL ERROR: Robot movement failed!") color red
+    forward led -m led_blink : ledBlink(off)
+    [# 
+        ioPortOccupied = false 
+        mqtt.publish("cargo/display/msg", "ERRORE: Movimento robot fallito!")
+    #]
+}
+Goto disengaged
+
+
+}
+
+// ============================================================
+// QActor: cargorobot - Gestione Movimenti (Wrapper di robotsmart26)
+// ============================================================
+QActor cargorobot context ctxcargo {
+[#
+var CurrentSlot = ""
+var StepTime    = 350
+#]
+
+State s0 initial {
+    println("cargorobot | avviato (Wrapper di robotsmart26)") color magenta
+}
+Goto waiting
+
+State waiting {
+    println("cargorobot | in attesa di richieste di movimento...") color magenta
+}
+Transition t0 
+    whenRequest robot_to_ioport -> handle_ioport
+    whenRequest robot_to_slot5  -> handle_slot5
+    whenRequest robot_to_slot   -> handle_final_slot
+
+State handle_ioport {
+    println("cargorobot | Tappa 1/3: Spostamento verso IOPort (4,1)") color magenta
+    request robotsmart -m moverobot : moverobot(4, 1, $StepTime)
+}
+Transition t1
+    whenReply moverobotdone   -> ioport_success
+    whenReply moverobotfailed -> ioport_failed
+
+State ioport_success {
+    replyTo robot_to_ioport with robot_ioport_done : robotIoportDone(none)
+}
+Goto waiting
+
+State ioport_failed {
+    println("cargorobot | ERRORE FATALE: Spostamento a IOPort fallito!") color red
+    replyTo robot_to_ioport with robot_ioport_failed : robotIoportFailed(obstacle)
+}
+Goto waiting
+
+State handle_slot5 {
+    println("cargorobot | Tappa 2/3: Spostamento verso SLOT5 (2,5) per etichettatura") color magenta
+    request robotsmart -m moverobot : moverobot(2, 5, $StepTime)
+}
+Transition t2
+    whenReply moverobotdone   -> slot5_success
+    whenReply moverobotfailed -> slot5_failed
+
+State slot5_success {
+    replyTo robot_to_slot5 with robot_slot5_done : robotSlot5Done(none)
+}
+Goto waiting
+
+State slot5_failed {
+    println("cargorobot | ERRORE FATALE: Spostamento a SLOT5 fallito!") color red
+    replyTo robot_to_slot5 with robot_slot5_failed : robotSlot5Failed(obstacle)
+}
+Goto waiting
+
+State handle_final_slot {
+    onMsg( robot_to_slot : robotToSlot(SLOT) ) {
+        [# CurrentSlot = payloadArg(0).toString() #]
+    }
+    println("cargorobot | Tappa 3/3: Spostamento verso lo slot riservato ($CurrentSlot)") color magenta
+    [#
+        var TargetX = 0
+        var TargetY = 0
+        if(CurrentSlot == "slot1") { TargetX = 1; TargetY = 1 }
+        else if(CurrentSlot == "slot2") { TargetX = 1; TargetY = 3 }
+        else if(CurrentSlot == "slot3") { TargetX = 4; TargetY = 3 }
+        else if(CurrentSlot == "slot4") { TargetX = 4; TargetY = 5 }
+    #]
+    request robotsmart -m moverobot : moverobot($TargetX, $TargetY,$StepTime)
+}
+Transition t3
+    whenReply moverobotdone   -> final_slot_success
+    whenReply moverobotfailed -> final_slot_failed
+
+State final_slot_success {
+    println("cargorobot | Container depositato nello slot di destinazione con successo!") color magenta
+    replyTo robot_to_slot with robot_slot_done : robotSlotDone(none)
+}
+Goto return_home
+
+State final_slot_failed {
+    println("cargorobot | ERRORE FATALE: Spostamento allo slot di destinazione fallito!") color red
+    replyTo robot_to_slot with robot_slot_failed : robotSlotFailed(obstacle)
+}
+Goto waiting
+
+State return_home {
+    println("cargorobot | Ritorno alla posizione HOME (0,0)") color magenta
+    request robotsmart -m moverobot : moverobot(0, 0, $StepTime)
+}
+Transition t4 
+    whenReply moverobotdone   -> waiting
+    whenReply moverobotfailed -> waiting
+
+
+}
+
+// ============================================================
+// QActor: led - Stato del led
+// ============================================================
+QActor led context ctxcargo {
+[# var ledState = "off" #]
+
+State s0 initial {
+    println("led | avviato - LED SPENTO") color blue
+}
+Goto off
+
+State off {
+    println("led | LED SPENTO") color green
+}
+Transition t0
+    whenMsg led_blink -> handle_initial_blink
+
+State handle_initial_blink {
+    onMsg( led_blink : ledBlink(STATE) ) {
+        [# 
+           ledState = payloadArg(0)
+           mqtt.publish("cargo/led/cmd", ledState)
+        #]
+    }
+}
+Goto on_blink if [# ledState == "on" #] else off
+
+State on_blink {
+    println("led | LED LAMPEGGIANTE (sistema IMPEGNATO)") color yellow
+}
+Transition t1
+    whenMsg led_blink -> handle_toggle
+
+State handle_toggle {
+    onMsg( led_blink : ledBlink(STATE) ) {
+        [# 
+           ledState = payloadArg(0)
+           mqtt.publish("cargo/led/cmd", ledState)
+        #]
+    }
+}
+Goto off if [# ledState == "off" #] else on_blink
+
+
+}
+
+// ============================================================
+// QActor: markerdevice - Marcatura container
+// ============================================================
+QActor markerdevice context ctxcargo {
+State s0 initial {
+println("markerdevice | avviato") color blue
+}
+Goto idle
+
+State idle {
+    println("markerdevice | idle") color green
+}
+Transition t0
+    whenRequest do_marking -> handle_marking
+
+State handle_marking {
+    println("markerdevice | Ricevuto comando di marcatura su SLOT5. Elaborazione barcode in corso...") color yellow
+    delay 2000
+    println("markerdevice | Marcatura completata! Barcode applicato correttamente sul container.") color green
+    replyTo do_marking with marking_done : markingDone(none)
+}
+Goto idle
+
+
+}
+
+QActor sonar context ctxcargo {
+[#
+var ContainerCounter = 0
+var FaultCounter     = 0
+var lastDistance     = 0.0
+
+val DFREE            = 100.0                // Distanza pedana vuota (cm)
+val DETECT_THRESHOLD = DFREE / 2            // 50.0 cm: D < DFREE/2 -> Container presente
+val STABLE_READINGS  = 10                   // ~3 secondi di stabilità (10 letture x 300ms)
+#]
+
+State s0 initial {
+    println("sonar | Avviato. DFREE=$DFREE cm, Threshold=${DETECT_THRESHOLD} cm") color blue
+}
+Goto idle
+
+State idle {
+    println("sonar | IDLE - In attesa letture sonar...") color green
+}
+Transition t0
+    whenMsg sensor_data           -> process_sensor_data
+
+// ===== PROCESSAMENTO DATI SENSORE REALE =====
+State process_sensor_data {
+    onMsg( sensor_data : sensorData(DISTANCE) ) {
+        [# lastDistance = payloadArg(0).toString().toDouble() #]
+    }
+    
+	[#
+	    if (lastDistance < DETECT_THRESHOLD) {
+	        ContainerCounter = minOf(ContainerCounter + 1, STABLE_READINGS)
+	        FaultCounter = maxOf(FaultCounter - 1, 0)
+	        println("sonar | Container in posizionamento ($ContainerCounter/$STABLE_READINGS): D=${lastDistance} cm < ${DETECT_THRESHOLD} cm")
+	    } 
+	    else if (lastDistance > DFREE) {
+	        FaultCounter = minOf(FaultCounter + 1, STABLE_READINGS)
+	        ContainerCounter = maxOf(ContainerCounter - 1, 0)
+	        println("sonar | Lettura anomala/guasto ($FaultCounter/$STABLE_READINGS): D=${lastDistance} cm > ${DFREE} cm")
+	    } 
+	    else {
+	        // zona intermedia: leggero decadimento invece di azzeramento secco
+	        ContainerCounter = maxOf(ContainerCounter - 1, 0)
+	        FaultCounter = maxOf(FaultCounter - 1, 0)
+	        println("sonar | Pedana libera/zona intermedia: D=${lastDistance} cm")
+	    }
+	#]
+}
+Goto emit_event_container if [# ContainerCounter >= STABLE_READINGS #] else check_fault_emit
+
+State check_fault_emit {
+}
+Goto emit_event_fault if [# FaultCounter >= STABLE_READINGS #] else idle
+
+State emit_event_container {
+    println("sonar | CONTAINER CONFERMATO STABILE PER 3s (D=${lastDistance} cm < ${DETECT_THRESHOLD}cm)! Emetto container_detected") color green
+    [# ContainerCounter = 0; FaultCounter = 0 #]
+    emit container_detected : containerDetected(none)
+}
+Goto idle
+
+State emit_event_fault {
+    println("sonar | GUASTO SENSORE CONFERMATO PER 3s (D=${lastDistance} cm > ${DFREE}cm)! Emetto sonar_fault") color red
+    [# ContainerCounter = 0; FaultCounter = 0 #]
+    emit sonar_fault : sonarFault(none)
+}
+Goto idle
+
+}

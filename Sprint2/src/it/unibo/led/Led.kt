@@ -33,7 +33,7 @@ class Led ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isdy
 		return { //this:ActionBasciFsm
 				state("s0") { //this:State
 					action { //it:State
-						CommUtils.outblue("led | started - LED OFF")
+						CommUtils.outblue("led | avviato - LED SPENTO")
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
@@ -43,19 +43,21 @@ class Led ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isdy
 				}	 
 				state("off") { //this:State
 					action { //it:State
-						CommUtils.outgreen("led | LED OFF")
+						CommUtils.outgreen("led | LED SPENTO")
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t027",targetState="handle_initial_blink",cond=whenDispatch("led_blink"))
+					 transition(edgeName="t031",targetState="handle_initial_blink",cond=whenDispatch("led_blink"))
 				}	 
 				state("handle_initial_blink") { //this:State
 					action { //it:State
 						if( checkMsgContent( Term.createTerm("ledBlink(STATE)"), Term.createTerm("ledBlink(STATE)"), 
 						                        currentMsg.msgContent()) ) { //set msgArgList
-								 ledState = payloadArg(0)  
+								 
+								           ledState = payloadArg(0)
+								           mqtt.publish("cargo/led/cmd", ledState)
 						}
 						//genTimer( actor, state )
 					}
@@ -69,19 +71,21 @@ class Led ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isdy
 				}	 
 				state("on_blink") { //this:State
 					action { //it:State
-						CommUtils.outyellow("led | LED BLINKING (system ENGAGED)")
+						CommUtils.outyellow("led | LED LAMPEGGIANTE (sistema IMPEGNATO)")
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t128",targetState="handle_toggle",cond=whenDispatch("led_blink"))
+					 transition(edgeName="t132",targetState="handle_toggle",cond=whenDispatch("led_blink"))
 				}	 
 				state("handle_toggle") { //this:State
 					action { //it:State
 						if( checkMsgContent( Term.createTerm("ledBlink(STATE)"), Term.createTerm("ledBlink(STATE)"), 
 						                        currentMsg.msgContent()) ) { //set msgArgList
-								 ledState = payloadArg(0)  
+								 
+								           ledState = payloadArg(0)
+								           mqtt.publish("cargo/led/cmd", ledState)
 						}
 						//genTimer( actor, state )
 					}

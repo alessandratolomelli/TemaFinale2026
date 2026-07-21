@@ -1,0 +1,13 @@
+services:
+
+  mosquitto:
+    image: eclipse-mosquitto:1.6.15
+    container_name: mosquittoalone
+    environment:
+      - MQTT_ALLOW_ANONYMOUS=true
+    ports:
+      - 1883:1883
+      - 9001:9001
+    volumes:
+      # Monta il file locale dentro il container nel percorso atteso da Mosquitto
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf # docker-compose -f mosquitto.yml -p mosquiito up
