@@ -146,7 +146,7 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 								
 								            TargetX = payloadArg(0).toInt()
 								            TargetY = payloadArg(1).toInt()
-								            TargetX_forRelease = TargetX + 1
+								            TargetX_forRelease = TargetX - 1
 						}
 						CommUtils.outmagenta("cargorobot | Spostamento verso ($TargetX_forRelease,$TargetY)")
 						request("moverobot", "moverobot($TargetX_forRelease,$TargetY,$StepTime)" ,"robotsmart" )  

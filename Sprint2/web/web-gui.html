@@ -121,17 +121,16 @@
                     btn.querySelectorAll('span')[1].innerText = "REQUEST";
                     btn.querySelectorAll('span')[1].className = "text-rose-200 text-[10px] font-semibold mt-0.5";
 
-                    // ← NUOVO: sottoscrizioni ai topic di display e stato
+                    //sottoscrizioni ai topic di display e stato
                     client.subscribe('sprint2/#');
-                    client.subscribe('unibo/qak/ioport');
-                    client.subscribe('cargo/display/msg');  // ← NUOVO: ascolta messaggi di display
+                    client.subscribe('cargo/display/msg');  // ascolta messaggi di display
                 });
                 
                 client.on('message', function (topic, message) {
                     const payload = message.toString();
                     appendLog(`[${topic}] ${payload}`, "text-slate-400");
                     
-                    // ← NUOVO: routing per topic di display
+                    //routing per topic di display
                     if (topic === 'cargo/display/msg') {
                         handleDisplayMessage(payload);
                     } else {
@@ -153,7 +152,7 @@
             }
         }
 
-        // ← NUOVO: gestione messaggi di display dal QActor display
+        // ←  : gestione messaggi di display dal QActor display
         function handleDisplayMessage(payload) {
             // Il payload è il messaggio grezzo dal sonar (es: "Out of service - Sensore guasto")
             setDisplayText(payload);

@@ -6,9 +6,9 @@ request( load_request, loadRequest(none) ).
 reply( load_accepted, loadAccepted(SLOTID) ).  %%for load_request
 reply( load_retrylater, loadRetryLater(none) ).  %%for load_request
 reply( load_refused, loadRefused(none) ).  %%for load_request
-event( container_detected, containerDetected(none) ).
-event( sonar_fault, sonarFault(none) ).
-event( sonar_recovered, sonarRecovered(none) ).
+dispatch( container_detected, containerDetected(none) ).
+dispatch( sonar_fault, sonarFault(none) ).
+dispatch( sonar_recovered, sonarRecovered(none) ).
 request( find_slot_position, findSlotPosition(SLOTID) ).
 reply( slot_position, slotPosition(POSX,POSY) ).  %%for find_slot_position
 request( robot_to_ioport, robotToIoport(none) ).
@@ -32,7 +32,6 @@ reply( release_done, releaseSlotDone(none) ).  %%for find_release
 dispatch( do_blink, do_blink(none) ).
 dispatch( sensor_data, sensorData(DISTANCE) ).
 dispatch( led_blink, ledBlink(STATE) ).
-event( robot_complete_notification, robotCompleteNotif(FINALSLOT) ).
 dispatch( slot_is_free, slot_is_free(none) ).
 dispatch( slot_is_full, slot_is_full(none) ).
 request( moverobot, moverobot(TARGETX,TARGETY,STEPTIME) ).

@@ -1,16 +1,13 @@
 /*
 
 =========================================================================
-
 cargoservice_sprint2_complete.qak - Sprint 2 (Diretto MQTT su Display)
-MODIFICATO: Aggiunto sonar_recovered per exit da OOS
-
 =========================================================================
 */
 System cargosystem
 
 // Allineato a Mosquitto
-mqttBroker "localhost" : 1883
+mqttBroker "localhost" : 1883   eventTopic "sprint2"
 
 // ===== INTERFACCIA CARGO E CONTROLLO =====
 Request load_request        : loadRequest(none)
@@ -18,10 +15,10 @@ Reply load_accepted         : loadAccepted(SLOTID) for load_request
 Reply load_retrylater       : loadRetryLater(none) for load_request
 Reply load_refused          : loadRefused(none)    for load_request
 
-// ===== INTERFACCIA EVENTI E DISPATCH SONAR =====
-Dispatch container_detected  : containerDetected(none)
-Dispatch sonar_fault         : sonarFault(none)
-Dispatch sonar_recovered     : sonarRecovered(none)         // Emesso quando D < DFREE dopo fault
+// ===== INTERFACCIA DISPATCH SONAR -> CARGOSERVICE (ex Event) =====
+Dispatch container_detected    : containerDetected(none)
+Dispatch sonar_fault           : sonarFault(none)              // Emesso quando D > DFREE per ≥3s
+Dispatch sonar_recovered       : sonarRecovered(none)          // Emesso quando D < DFREE dopo fault
 
 Request find_slot_position  : findSlotPosition(SLOTID)
 Reply slot_position         : slotPosition(POSX, POSY) for find_slot_position
@@ -57,8 +54,6 @@ Reply release_done          : releaseSlotDone(none) for find_release
 Dispatch do_blink           : do_blink(none)
 Dispatch sensor_data        : sensorData(DISTANCE)
 Dispatch led_blink          : ledBlink(STATE)
-
-Event robot_complete_notification : robotCompleteNotif(FINALSLOT)
 
 // ===== AUTODISPATCH PER GESTIONE STATI =====
 Dispatch slot_is_free       : slot_is_free(none)
@@ -212,25 +207,13 @@ var systemOutOfService = false
 #]
 
 State s0 initial {
-    println("cargoservice | Avviato - Iscrizione esclusiva al topic sonar") color blue
-    [# 
-        mqtt.publish("cargo/display/msg", "Inizializzazione...") 
-
-        // Solo cargoservice si iscrive al topic del sonar!
-        mqtt.subscribe("cargo/sonar/events") { topic, msg ->
-            val payload = String(msg.payload)
-            when(payload) {
-                "sonar_fault"        -> this.autoMsg("sonar_fault", "sonarFault(none)")
-                "sonar_recovered"    -> this.autoMsg("sonar_recovered", "sonarRecovered(none)")
-                "container_detected" -> this.autoMsg("container_detected", "containerDetected(none)")
-            }
-        }
-    #]
+    println("cargoservice | started") color blue
+    [# mqtt.publish("cargo/display/msg", "Inizializzazione...") #]
 }
 Goto disengaged
 
 State disengaged {
-    println("cargoservice | waiting for load request or sonar dispatch") color green
+    println("cargoservice | waiting for load request") color green
     if [# !systemOutOfService #] {
         [# mqtt.publish("cargo/display/msg", "Service working - Pronto per carico") #]
     }
@@ -313,8 +296,8 @@ State engaged {
     [# mqtt.publish("cargo/display/msg", "Service working - LED acceso, attesa container") #]
 }
 Transition t2
-    whenTime 30000              -> handle_timeout
-    whenEvent container_detected -> container_arrived
+    whenTime 30000           -> handle_timeout
+    whenMsg container_detected -> container_arrived
 
 State handle_timeout {
     println("cargoservice | TIMEOUT: Container non posizionato entro 30s. Rilascio lo slot...") color red
@@ -336,7 +319,7 @@ State timeout_cleanup {
 Goto disengaged
 
 State container_arrived {
-    println("cargoservice | Container detected via Sonar Event - requesting robot to IOPort") color green
+    println("cargoservice | Container detected via Sonar Dispatch - requesting robot to IOPort") color green
     [# mqtt.publish("cargo/display/msg", "Container rilevato! Robot in movimento...") #]
     request cargorobot -m robot_to_ioport : robotToIoport(none)
 }
@@ -386,7 +369,6 @@ State finalize_load_ok {
         mqtt.publish("cargo/display/msg", "Stivaggio completato in $SlotSend!")
     #]
     println("cargoservice | transfer completed and slot occupied") color green
-    emit robot_complete_notification : robotCompleteNotif($SlotSend)
 }
 Goto disengaged
 
@@ -481,7 +463,7 @@ State move_to_final_slot {
         [#
             TargetX = payloadArg(0).toInt()
             TargetY = payloadArg(1).toInt()
-            TargetX_forRelease = TargetX + 1
+            TargetX_forRelease = TargetX - 1
         #]
     }
     println("cargorobot | Spostamento verso ($TargetX_forRelease,$TargetY)") color magenta
@@ -588,7 +570,6 @@ Goto idle
 
 // ============================================================
 // QActor: sonar - Rilevamento container e fault
-// MODIFICATO: Aggiunto tracking dello stato di fault e recovery immediato
 // ============================================================
 QActor sonar context ctxcargo {
 [#
@@ -643,40 +624,34 @@ State process_sensor_data {
         }
     #]
 }
-Goto emit_event_recovery if [# justRecovered #] else check_normal_flow
+Goto event_recovery if [# justRecovered #] else check_normal_flow
 
 State check_normal_flow {
 }
-Goto emit_event_container if [# ContainerCounter >= STABLE_READINGS #] else check_fault_emit
+Goto event_container if [# ContainerCounter >= STABLE_READINGS #] else check_fault
 
-State check_fault_emit {
+State check_fault {
 }
-Goto emit_event_fault if [# FaultCounter >= STABLE_READINGS #] else idle
+Goto event_fault if [# FaultCounter >= STABLE_READINGS #] else idle
 
-State emit_event_container {
-    println("sonar | CONTAINER RILEVATO! Pubblico su cargo/sonar/events") color green
-    [# 
-        ContainerCounter = 0; FaultCounter = 0
-        mqtt.publish("cargo/sonar/events", "container_detected") 
-    #]
+State event_container {
+    println("sonar | CONTAINER CONFERMATO STABILE PER 3s (D=${lastDistance} cm < ${DETECT_THRESHOLD}cm)! Invio container_detected a cargoservice") color green
+    [# ContainerCounter = 0; FaultCounter = 0 #]
+    forward cargoservice -m container_detected : containerDetected(none)
 }
 Goto idle
 
-State emit_event_fault {
-    println("sonar | GUASTO SENSORE! Pubblico su cargo/sonar/events") color red
-    [# 
-        ContainerCounter = 0; FaultCounter = 0; isFaulted = true
-        mqtt.publish("cargo/sonar/events", "sonar_fault") 
-    #]
+State event_fault {
+    println("sonar | GUASTO SENSORE CONFERMATO PER 3s (D=${lastDistance} cm > ${DFREE}cm)! Invio sonar_fault a cargoservice") color red
+    [# ContainerCounter = 0; FaultCounter = 0; isFaulted = true #]
+    forward cargoservice -m sonar_fault : sonarFault(none)
 }
 Goto idle
 
-State emit_event_recovery {
-    println("sonar | RIPRISTINO SENSORE! Pubblico su cargo/sonar/events") color green
-    [# 
-        ContainerCounter = 0; FaultCounter = 0; isFaulted = false; justRecovered = false
-        mqtt.publish("cargo/sonar/events", "sonar_recovered") 
-    #]
+State event_recovery {
+    println("sonar | 🟢 PEDANA RILEVATA (D=${lastDistance} cm < ${DFREE}cm) DOPO GUASTO! Invio sonar_recovered a cargoservice") color green
+    [# ContainerCounter = 0; FaultCounter = 0; isFaulted = false; justRecovered = false #]
+    forward cargoservice -m sonar_recovered : sonarRecovered(none)
 }
 Goto idle
 
