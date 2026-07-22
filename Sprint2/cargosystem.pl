@@ -8,7 +8,9 @@ reply( load_retrylater, loadRetryLater(none) ).  %%for load_request
 reply( load_refused, loadRefused(none) ).  %%for load_request
 event( container_detected, containerDetected(none) ).
 event( sonar_fault, sonarFault(none) ).
-event( load_timeout, loadTimeout(none) ).
+event( sonar_recovered, sonarRecovered(none) ).
+request( find_slot_position, findSlotPosition(SLOTID) ).
+reply( slot_position, slotPosition(POSX,POSY) ).  %%for find_slot_position
 request( robot_to_ioport, robotToIoport(none) ).
 reply( robot_ioport_done, robotIoportDone(none) ).  %%for robot_to_ioport
 reply( robot_ioport_failed, robotIoportFailed(ARG) ).  %%for robot_to_ioport

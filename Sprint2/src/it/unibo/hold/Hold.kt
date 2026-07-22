@@ -30,14 +30,22 @@ class Hold ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isd
 		//val interruptedStateTransitions = mutableListOf<Transition>()
 		//IF actor.withobj !== null val actor.withobj.name� = actor.withobj.method�ENDIF
 		
-		val slots = mutableMapOf(
-		"slot1" to "free",
-		"slot2" to "free",
-		"slot3" to "free",
-		"slot4" to "free"
-		)
-		var ReservedSlot = ""
-		var slotIsAvailable = false
+			val slots = mutableMapOf(
+			    "slot1" to "free",
+			    "slot2" to "free",
+			    "slot3" to "free",
+			    "slot4" to "free"
+			)
+			val slotPositions = mutableMapOf(     // NUOVO: unica fonte di verità sul layout fisico
+			    "slot1" to Pair(1, 2),
+			    "slot2" to Pair(1, 3),
+			    "slot3" to Pair(3, 2),
+			    "slot4" to Pair(3, 3)
+			)
+			var ReservedSlot = ""
+			var slotIsAvailable = false
+			var PosX = 0
+			var PosY = 0
 		return { //this:ActionBasciFsm
 				state("s0") { //this:State
 					action { //it:State
@@ -60,18 +68,34 @@ class Hold ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isd
 					 transition(edgeName="t00",targetState="find_slot_logic",cond=whenRequest("find_free_slot"))
 					transition(edgeName="t01",targetState="occupy_slot",cond=whenRequest("find_occupy"))
 					transition(edgeName="t02",targetState="free_slot",cond=whenRequest("find_release"))
+					transition(edgeName="t03",targetState="respond_position",cond=whenRequest("find_slot_position"))
+				}	 
+				state("respond_position") { //this:State
+					action { //it:State
+						if( checkMsgContent( Term.createTerm("findSlotPosition(SLOTID)"), Term.createTerm("findSlotPosition(SLOTID)"), 
+						                        currentMsg.msgContent()) ) { //set msgArgList
+								
+								            val querySlot = payloadArg(0).toString()
+								            val pos = slotPositions[querySlot] ?: Pair(0, 0)
+								            PosX = pos.first
+								            PosY = pos.second
+						}
+						CommUtils.outcyan("hold | Posizione richiesta per $querySlot -> ($posX,$posY)")
+						 mqtt.publish("cargo/display/msg", "Slot $querySlot -> Coordinate ($PosX,$PosY)")  
+						answer("find_slot_position", "slot_position", "slotPosition($PosX,$PosY)"   )  
+						//genTimer( actor, state )
+					}
+					//After Lenzi Aug2002
+					sysaction { //it:State
+					}	 	 
+					 transition( edgeName="goto",targetState="idle", cond=doswitch() )
 				}	 
 				state("find_slot_logic") { //this:State
 					action { //it:State
 						
 						        val freeSlot = slots.filter { it.value == "free" }.keys.firstOrNull()
 						        slotIsAvailable = freeSlot != null
-						        if (slotIsAvailable) {
-						            slots[freeSlot!!] = "reserved"
-						            ReservedSlot = freeSlot!!
-						        } else {
-						            ReservedSlot = ""
-						        }
+						        ReservedSlot = freeSlot ?: ""         // lo slot resta "free" finché il robot non conferma il deposito reale
 						if(  slotIsAvailable  
 						 ){forward("slot_is_free", "slot_is_free(none)" ,"hold" ) 
 						}
@@ -83,8 +107,8 @@ class Hold ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isd
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t0b3",targetState="respond_slot_found",cond=whenDispatch("slot_is_free"))
-					transition(edgeName="t0b4",targetState="respond_slot_full",cond=whenDispatch("slot_is_full"))
+					 transition(edgeName="t0b4",targetState="respond_slot_found",cond=whenDispatch("slot_is_free"))
+					transition(edgeName="t0b5",targetState="respond_slot_full",cond=whenDispatch("slot_is_full"))
 				}	 
 				state("respond_slot_found") { //this:State
 					action { //it:State
@@ -118,16 +142,19 @@ class Hold ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isd
 					action { //it:State
 						if( checkMsgContent( Term.createTerm("occupySlot(SLOTID)"), Term.createTerm("occupySlot(SLOTID)"), 
 						                        currentMsg.msgContent()) ) { //set msgArgList
-								 
-								            val SlotToOccupy = payloadArg(0).toString()
-								            if (slots[SlotToOccupy] == "reserved" || slots[SlotToOccupy] == "free") {
-								                slots[SlotToOccupy] = "occupied" 
-								            }
-								            val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
-								            mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
-								CommUtils.outgreen("hold | $SlotToOccupy ora OCCUPATO")
-								answer("find_occupy", "occupy_done", "occupySlotDone(none)"   )  
+								 val SlotToOccupy = payloadArg(0).toString()  
 						}
+						if(  slots[SlotToOccupy] == "free"  
+						 ){ 
+						            slots[SlotToOccupy] = "occupied" 
+						            val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
+						            mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
+						CommUtils.outgreen("hold | $SlotToOccupy ora OCCUPATO")
+						}
+						else
+						 {CommUtils.outred("hold | ANOMALIA: $SlotToOccupy già occupato, richiesta ignorata")
+						 }
+						answer("find_occupy", "occupy_done", "occupySlotDone(none)"   )  
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002

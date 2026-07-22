@@ -48,7 +48,7 @@ class Markerdevice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t033",targetState="handle_marking",cond=whenRequest("do_marking"))
+					 transition(edgeName="t036",targetState="handle_marking",cond=whenRequest("do_marking"))
 				}	 
 				state("handle_marking") { //this:State
 					action { //it:State

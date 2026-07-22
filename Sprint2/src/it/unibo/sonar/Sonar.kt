@@ -33,6 +33,8 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 		var ContainerCounter = 0
 		var FaultCounter     = 0
 		var lastDistance     = 0.0
+		var isFaulted        = false     // Traccia se siamo attualmente in OOS
+		var justRecovered    = false     // Flag per il branch immediato di recovery
 		
 		val DFREE            = 100.0                // Distanza pedana vuota (cm)
 		val DETECT_THRESHOLD = DFREE / 2            // 50.0 cm: D < DFREE/2 -> Container presente
@@ -56,7 +58,7 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t034",targetState="process_sensor_data",cond=whenDispatch("sensor_data"))
+					 transition(edgeName="t037",targetState="process_sensor_data",cond=whenDispatch("sensor_data"))
 				}	 
 				state("process_sensor_data") { //this:State
 					action { //it:State
@@ -65,22 +67,38 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 								 lastDistance = payloadArg(0).toString().toDouble()  
 						}
 						
-							    if (lastDistance < DETECT_THRESHOLD) {
-							        ContainerCounter = minOf(ContainerCounter + 1, STABLE_READINGS)
-							        FaultCounter = maxOf(FaultCounter - 1, 0)
-							        println("sonar | Container in posizionamento ($ContainerCounter/$STABLE_READINGS): D=${lastDistance} cm < ${DETECT_THRESHOLD} cm")
-							    } 
-							    else if (lastDistance > DFREE) {
-							        FaultCounter = minOf(FaultCounter + 1, STABLE_READINGS)
-							        ContainerCounter = maxOf(ContainerCounter - 1, 0)
-							        println("sonar | Lettura anomala/guasto ($FaultCounter/$STABLE_READINGS): D=${lastDistance} cm > ${DFREE} cm")
-							    } 
-							    else {
-							        // zona intermedia: leggero decadimento invece di azzeramento secco
-							        ContainerCounter = maxOf(ContainerCounter - 1, 0)
-							        FaultCounter = maxOf(FaultCounter - 1, 0)
-							        println("sonar | Pedana libera/zona intermedia: D=${lastDistance} cm")
-							    }
+						        // Recovery immediato: se siamo faulted e torna anche solo 1 lettura < DFREE, non serve debounce
+						        justRecovered = isFaulted && (lastDistance < DFREE)
+						
+						        if (!justRecovered) {
+						            if (lastDistance < DETECT_THRESHOLD) {
+						                ContainerCounter = minOf(ContainerCounter + 1, STABLE_READINGS)
+						                FaultCounter = maxOf(FaultCounter - 1, 0)
+						                println("sonar | Container in posizionamento ($ContainerCounter/$STABLE_READINGS): D=${lastDistance} cm < ${DETECT_THRESHOLD} cm")
+						            } 
+						            else if (lastDistance > DFREE) {
+						                FaultCounter = minOf(FaultCounter + 1, STABLE_READINGS)
+						                ContainerCounter = maxOf(ContainerCounter - 1, 0)
+						                println("sonar | Lettura anomala/guasto ($FaultCounter/$STABLE_READINGS): D=${lastDistance} cm > ${DFREE} cm")
+						            } 
+						            else {
+						                ContainerCounter = maxOf(ContainerCounter - 1, 0)
+						                FaultCounter = maxOf(FaultCounter - 1, 0)
+						                println("sonar | Pedana libera/zona intermedia: D=${lastDistance} cm")
+						            }
+						        }
+						//genTimer( actor, state )
+					}
+					//After Lenzi Aug2002
+					sysaction { //it:State
+					}	 	 
+					 transition( edgeName="goto",targetState="emit_event_recovery", cond=doswitchGuarded({ justRecovered  
+					}) )
+					transition( edgeName="goto",targetState="check_normal_flow", cond=doswitchGuarded({! ( justRecovered  
+					) }) )
+				}	 
+				state("check_normal_flow") { //this:State
+					action { //it:State
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
@@ -118,8 +136,20 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 				state("emit_event_fault") { //this:State
 					action { //it:State
 						CommUtils.outred("sonar | GUASTO SENSORE CONFERMATO PER 3s (D=${lastDistance} cm > ${DFREE}cm)! Emetto sonar_fault")
-						 ContainerCounter = 0; FaultCounter = 0  
+						 ContainerCounter = 0; FaultCounter = 0; isFaulted = true  
 						emit("sonar_fault", "sonarFault(none)" ) 
+						//genTimer( actor, state )
+					}
+					//After Lenzi Aug2002
+					sysaction { //it:State
+					}	 	 
+					 transition( edgeName="goto",targetState="idle", cond=doswitch() )
+				}	 
+				state("emit_event_recovery") { //this:State
+					action { //it:State
+						CommUtils.outgreen("sonar | 🟢 PEDANA RILEVATA (D=${lastDistance} cm < ${DFREE}cm) DOPO GUASTO! Emetto sonar_recovered")
+						 ContainerCounter = 0; FaultCounter = 0; isFaulted = false; justRecovered = false  
+						emit("sonar_recovered", "sonarRecovered(none)" ) 
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002

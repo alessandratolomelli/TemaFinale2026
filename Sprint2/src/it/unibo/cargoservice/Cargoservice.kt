@@ -56,8 +56,9 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t05",targetState="handle_load_request",cond=whenRequest("load_request"))
-					transition(edgeName="t06",targetState="mark_out_of_service",cond=whenEvent("sonar_fault"))
+					 transition(edgeName="t06",targetState="handle_load_request",cond=whenRequest("load_request"))
+					transition(edgeName="t07",targetState="mark_out_of_service",cond=whenEvent("sonar_fault"))
+					transition(edgeName="t08",targetState="clear_out_of_service",cond=whenEvent("sonar_recovered"))
 				}	 
 				state("mark_out_of_service") { //this:State
 					action { //it:State
@@ -65,6 +66,19 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 						 
 						        systemOutOfService = true 
 						        mqtt.publish("cargo/display/msg", "Out of service - Sensore guasto")
+						//genTimer( actor, state )
+					}
+					//After Lenzi Aug2002
+					sysaction { //it:State
+					}	 	 
+					 transition( edgeName="goto",targetState="disengaged", cond=doswitch() )
+				}	 
+				state("clear_out_of_service") { //this:State
+					action { //it:State
+						CommUtils.outgreen("cargoservice | ✅ SONAR RECOVERY: Sistema torna WORKING")
+						 
+						        systemOutOfService = false 
+						        mqtt.publish("cargo/display/msg", "Service working - Sensore ripristinato")
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
@@ -121,8 +135,8 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t17",targetState="slot_available",cond=whenReply("slot_found"))
-					transition(edgeName="t18",targetState="hold_is_full",cond=whenReply("slot_full"))
+					 transition(edgeName="t19",targetState="slot_available",cond=whenReply("slot_found"))
+					transition(edgeName="t110",targetState="hold_is_full",cond=whenReply("slot_full"))
 				}	 
 				state("slot_available") { //this:State
 					action { //it:State
@@ -166,22 +180,21 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 				 	 		stateTimer = TimerActor("timer_engaged", 
 				 	 					  scope, context!!, "local_tout_"+name+"_engaged", 30000.toLong() )  //OCT2023
 					}	 	 
-					 transition(edgeName="t29",targetState="handle_timeout",cond=whenTimeout("local_tout_"+name+"_engaged"))   
-					transition(edgeName="t210",targetState="container_arrived",cond=whenEvent("container_detected"))
+					 transition(edgeName="t211",targetState="handle_timeout",cond=whenTimeout("local_tout_"+name+"_engaged"))   
+					transition(edgeName="t212",targetState="container_arrived",cond=whenEvent("container_detected"))
 				}	 
 				state("handle_timeout") { //this:State
 					action { //it:State
 						CommUtils.outred("cargoservice | TIMEOUT: Container non posizionato entro 30s. Rilascio lo slot...")
 						forward("led_blink", "ledBlink(off)" ,"led" ) 
-						 mqtt.publish("cargo/display/msg", "Timeout! Slot $CurrentSlot rilasciato")  
-						emit("load_timeout", "loadTimeout(none)" ) 
+						 mqtt.publish("cargo/display/msg", "Slot $CurrentSlot rilasciato")  
 						request("find_release", "releaseSlot($CurrentSlot)" ,"hold" )  
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t_timeout11",targetState="timeout_cleanup",cond=whenReply("release_done"))
+					 transition(edgeName="t_timeout13",targetState="timeout_cleanup",cond=whenReply("release_done"))
 				}	 
 				state("timeout_cleanup") { //this:State
 					action { //it:State
@@ -207,8 +220,8 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t312",targetState="go_to_slot5",cond=whenReply("robot_ioport_done"))
-					transition(edgeName="t313",targetState="handle_fatal_error",cond=whenReply("robot_ioport_failed"))
+					 transition(edgeName="t314",targetState="go_to_slot5",cond=whenReply("robot_ioport_done"))
+					transition(edgeName="t315",targetState="handle_fatal_error",cond=whenReply("robot_ioport_failed"))
 				}	 
 				state("go_to_slot5") { //this:State
 					action { //it:State
@@ -220,8 +233,8 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t414",targetState="request_marking_activity",cond=whenReply("robot_slot5_done"))
-					transition(edgeName="t415",targetState="handle_fatal_error",cond=whenReply("robot_slot5_failed"))
+					 transition(edgeName="t416",targetState="request_marking_activity",cond=whenReply("robot_slot5_done"))
+					transition(edgeName="t417",targetState="handle_fatal_error",cond=whenReply("robot_slot5_failed"))
 				}	 
 				state("request_marking_activity") { //this:State
 					action { //it:State
@@ -233,7 +246,7 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t516",targetState="go_to_final_slot",cond=whenReply("marking_done"))
+					 transition(edgeName="t518",targetState="go_to_final_slot",cond=whenReply("marking_done"))
 				}	 
 				state("go_to_final_slot") { //this:State
 					action { //it:State
@@ -245,8 +258,8 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t617",targetState="on_robot_completed",cond=whenReply("robot_slot_done"))
-					transition(edgeName="t618",targetState="handle_fatal_error",cond=whenReply("robot_slot_failed"))
+					 transition(edgeName="t619",targetState="on_robot_completed",cond=whenReply("robot_slot_done"))
+					transition(edgeName="t620",targetState="handle_fatal_error",cond=whenReply("robot_slot_failed"))
 				}	 
 				state("on_robot_completed") { //this:State
 					action { //it:State
@@ -258,7 +271,7 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t719",targetState="finalize_load_ok",cond=whenReply("occupy_done"))
+					 transition(edgeName="t721",targetState="finalize_load_ok",cond=whenReply("occupy_done"))
 				}	 
 				state("finalize_load_ok") { //this:State
 					action { //it:State

@@ -90,10 +90,10 @@ class Cargorobot ( name: String, scope: CoroutineScope, isconfined: Boolean=fals
 						            var TargetX = 0
 						            var TargetY = 0
 						        
-						            if(CurrentSlot == "slot1") { TargetX = 1; TargetY = 1 }
-						            else if(CurrentSlot == "slot2") { TargetX = 1; TargetY = 3 }
-						            else if(CurrentSlot == "slot3") { TargetX = 4; TargetY = 3 }
-						            else if(CurrentSlot == "slot4") { TargetX = 4; TargetY = 5 }
+						            if(CurrentSlot == "slot1") { TargetX = 2; TargetY = 2 }
+						            else if(CurrentSlot == "slot2") { TargetX = 2; TargetY = 3 }
+						            else if(CurrentSlot == "slot3") { TargetX = 2; TargetY = 2 }
+						            else if(CurrentSlot == "slot4") { TargetX = 2; TargetY = 3 }
 						request("moverobot", "moverobot($TargetX,$TargetY,$StepTime)" ,"robotsmart" )  
 						//genTimer( actor, state )
 					}

@@ -3,6 +3,7 @@
 =========================================================================
 
 cargoservice_sprint2_complete.qak - Sprint 2 (Diretto MQTT su Display)
+MODIFICATO: Aggiunto sonar_recovered per exit da OOS
 
 =========================================================================
 */
@@ -20,7 +21,10 @@ Reply load_refused          : loadRefused(none)    for load_request
 // ===== INTERFACCIA EVENTI E DISPATCH SONAR =====
 Event container_detected       : containerDetected(none)
 Event sonar_fault              : sonarFault(none)              // Emesso quando D > DFREE per ≥3s
-Event load_timeout             : loadTimeout(none)
+Event sonar_recovered          : sonarRecovered(none)          // Emesso quando D < DFREE dopo fault
+
+Request find_slot_position  : findSlotPosition(SLOTID)
+Reply slot_position         : slotPosition(POSX, POSY) for find_slot_position
 
 // ===== INTERFACCIA MOVIMENTI ATOMICI ROBOT =====
 Request robot_to_ioport     : robotToIoport(none)
@@ -75,14 +79,22 @@ ExternalQActor robotsmart context ctxrobotsmart
 // ============================================================
 QActor hold context ctxcargo {
 [#
-val slots = mutableMapOf(
-"slot1" to "free",
-"slot2" to "free",
-"slot3" to "free",
-"slot4" to "free"
-)
-var ReservedSlot = ""
-var slotIsAvailable = false
+	val slots = mutableMapOf(
+	    "slot1" to "free",
+	    "slot2" to "free",
+	    "slot3" to "free",
+	    "slot4" to "free"
+	)
+	val slotPositions = mutableMapOf(     // NUOVO: unica fonte di verità sul layout fisico
+	    "slot1" to Pair(1, 2),
+	    "slot2" to Pair(1, 3),
+	    "slot3" to Pair(3, 2),
+	    "slot4" to Pair(3, 3)
+	)
+	var ReservedSlot = ""
+	var slotIsAvailable = false
+	var PosX = 0
+	var PosY = 0
 #]
 
 State s0 initial { 
@@ -97,17 +109,28 @@ Transition t0
     whenRequest find_free_slot -> find_slot_logic
     whenRequest find_occupy    -> occupy_slot
     whenRequest find_release   -> free_slot
+    whenRequest find_slot_position -> respond_position
+
+State respond_position {
+    onMsg( find_slot_position : findSlotPosition(SLOTID) ) {
+        [#
+            val querySlot = payloadArg(0).toString()
+            val pos = slotPositions[querySlot] ?: Pair(0, 0)
+            PosX = pos.first
+            PosY = pos.second
+        #]
+    }
+    println("hold | Posizione richiesta per $querySlot -> ($posX,$posY)") color cyan
+    [# mqtt.publish("cargo/display/msg", "Slot $querySlot -> Coordinate ($PosX,$PosY)") #]
+    replyTo find_slot_position with slot_position : slotPosition($PosX, $PosY)
+}
+Goto idle
 
 State find_slot_logic {
     [#
         val freeSlot = slots.filter { it.value == "free" }.keys.firstOrNull()
         slotIsAvailable = freeSlot != null
-        if (slotIsAvailable) {
-            slots[freeSlot!!] = "reserved"
-            ReservedSlot = freeSlot!!
-        } else {
-            ReservedSlot = ""
-        }
+        ReservedSlot = freeSlot ?: ""         // lo slot resta "free" finché il robot non conferma il deposito reale
     #]
     if [# slotIsAvailable #] {
         forward hold -m slot_is_free : slot_is_free(none)
@@ -141,17 +164,19 @@ Goto idle
 
 State occupy_slot {
     onMsg( find_occupy : occupySlot(SLOTID) ) {
+        [# val SlotToOccupy = payloadArg(0).toString() #]
+    }
+    if [# slots[SlotToOccupy] == "free" #] {
         [# 
-            val SlotToOccupy = payloadArg(0).toString()
-            if (slots[SlotToOccupy] == "reserved" || slots[SlotToOccupy] == "free") {
-                slots[SlotToOccupy] = "occupied" 
-            }
+            slots[SlotToOccupy] = "occupied" 
             val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
             mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
         #]
         println("hold | $SlotToOccupy ora OCCUPATO") color green
-        replyTo find_occupy with occupy_done : occupySlotDone(none)
+    } else {
+        println("hold | ANOMALIA: $SlotToOccupy già occupato, richiesta ignorata") color red
     }
+    replyTo find_occupy with occupy_done : occupySlotDone(none)
 }
 Goto idle
 
@@ -168,7 +193,6 @@ State free_slot {
     }
 }
 Goto idle
-
 
 }
 
@@ -195,14 +219,24 @@ State disengaged {
     }
 }
 Transition t0
-    whenRequest load_request -> handle_load_request
-    whenEvent sonar_fault    -> mark_out_of_service
+    whenRequest load_request  -> handle_load_request
+    whenEvent sonar_fault     -> mark_out_of_service
+    whenEvent sonar_recovered -> clear_out_of_service
 
 State mark_out_of_service {
     println("cargoservice | ⚠️  SONAR FAULT: Sistema OUT OF SERVICE") color red
     [# 
         systemOutOfService = true 
         mqtt.publish("cargo/display/msg", "Out of service - Sensore guasto")
+    #]
+}
+Goto disengaged
+
+State clear_out_of_service {
+    println("cargoservice | ✅ SONAR RECOVERY: Sistema torna WORKING") color green
+    [# 
+        systemOutOfService = false 
+        mqtt.publish("cargo/display/msg", "Service working - Sensore ripristinato")
     #]
 }
 Goto disengaged
@@ -268,8 +302,7 @@ Transition t2
 State handle_timeout {
     println("cargoservice | TIMEOUT: Container non posizionato entro 30s. Rilascio lo slot...") color red
     forward led -m led_blink : ledBlink(off)
-    [# mqtt.publish("cargo/display/msg", "Timeout! Slot $CurrentSlot rilasciato") #]
-    emit load_timeout : loadTimeout(none)
+    [# mqtt.publish("cargo/display/msg", "Slot $CurrentSlot rilasciato") #]
     request hold -m find_release : releaseSlot($CurrentSlot)
 }
 Transition t_timeout
@@ -360,6 +393,8 @@ QActor cargorobot context ctxcargo {
 [#
 var CurrentSlot = ""
 var StepTime    = 350
+var TargetX     = 0 
+var TargetY     = 0 
 #]
 
 State s0 initial {
@@ -417,16 +452,21 @@ State handle_final_slot {
     onMsg( robot_to_slot : robotToSlot(SLOT) ) {
         [# CurrentSlot = payloadArg(0).toString() #]
     }
-    println("cargorobot | Tappa 3/3: Spostamento verso lo slot riservato ($CurrentSlot)") color magenta
-    [#
-        var TargetX = 0
-        var TargetY = 0
-        if(CurrentSlot == "slot1") { TargetX = 1; TargetY = 1 }
-        else if(CurrentSlot == "slot2") { TargetX = 1; TargetY = 3 }
-        else if(CurrentSlot == "slot3") { TargetX = 4; TargetY = 3 }
-        else if(CurrentSlot == "slot4") { TargetX = 4; TargetY = 5 }
-    #]
-    request robotsmart -m moverobot : moverobot($TargetX, $TargetY,$StepTime)
+    println("cargorobot | Tappa 3/3: richiedo posizione fisica per $CurrentSlot alla hold") color magenta
+    request hold -m find_slot_position : findSlotPosition($CurrentSlot)
+}
+Transition t3a
+    whenReply slot_position -> move_to_final_slot
+
+State move_to_final_slot {
+    onMsg( slot_position : slotPosition(POSX, POSY) ) {
+        [#
+            TargetX = payloadArg(0).toString().toInt()
+            TargetY = payloadArg(1).toString().toInt()
+        #]
+    }
+    println("cargorobot | Spostamento verso ($TargetX,$TargetY)") color magenta
+    request robotsmart -m moverobot : moverobot($TargetX, $TargetY, $StepTime)
 }
 Transition t3
     whenReply moverobotdone   -> final_slot_success
@@ -527,11 +567,17 @@ Goto idle
 
 }
 
+// ============================================================
+// QActor: sonar - Rilevamento container e fault
+// MODIFICATO: Aggiunto tracking dello stato di fault e recovery immediato
+// ============================================================
 QActor sonar context ctxcargo {
 [#
 var ContainerCounter = 0
 var FaultCounter     = 0
 var lastDistance     = 0.0
+var isFaulted        = false     // Traccia se siamo attualmente in OOS
+var justRecovered    = false     // Flag per il branch immediato di recovery
 
 val DFREE            = 100.0                // Distanza pedana vuota (cm)
 val DETECT_THRESHOLD = DFREE / 2            // 50.0 cm: D < DFREE/2 -> Container presente
@@ -554,25 +600,33 @@ State process_sensor_data {
     onMsg( sensor_data : sensorData(DISTANCE) ) {
         [# lastDistance = payloadArg(0).toString().toDouble() #]
     }
-    
-	[#
-	    if (lastDistance < DETECT_THRESHOLD) {
-	        ContainerCounter = minOf(ContainerCounter + 1, STABLE_READINGS)
-	        FaultCounter = maxOf(FaultCounter - 1, 0)
-	        println("sonar | Container in posizionamento ($ContainerCounter/$STABLE_READINGS): D=${lastDistance} cm < ${DETECT_THRESHOLD} cm")
-	    } 
-	    else if (lastDistance > DFREE) {
-	        FaultCounter = minOf(FaultCounter + 1, STABLE_READINGS)
-	        ContainerCounter = maxOf(ContainerCounter - 1, 0)
-	        println("sonar | Lettura anomala/guasto ($FaultCounter/$STABLE_READINGS): D=${lastDistance} cm > ${DFREE} cm")
-	    } 
-	    else {
-	        // zona intermedia: leggero decadimento invece di azzeramento secco
-	        ContainerCounter = maxOf(ContainerCounter - 1, 0)
-	        FaultCounter = maxOf(FaultCounter - 1, 0)
-	        println("sonar | Pedana libera/zona intermedia: D=${lastDistance} cm")
-	    }
-	#]
+
+    [#
+        // Recovery immediato: se siamo faulted e torna anche solo 1 lettura < DFREE, non serve debounce
+        justRecovered = isFaulted && (lastDistance < DFREE)
+
+        if (!justRecovered) {
+            if (lastDistance < DETECT_THRESHOLD) {
+                ContainerCounter = minOf(ContainerCounter + 1, STABLE_READINGS)
+                FaultCounter = maxOf(FaultCounter - 1, 0)
+                println("sonar | Container in posizionamento ($ContainerCounter/$STABLE_READINGS): D=${lastDistance} cm < ${DETECT_THRESHOLD} cm")
+            } 
+            else if (lastDistance > DFREE) {
+                FaultCounter = minOf(FaultCounter + 1, STABLE_READINGS)
+                ContainerCounter = maxOf(ContainerCounter - 1, 0)
+                println("sonar | Lettura anomala/guasto ($FaultCounter/$STABLE_READINGS): D=${lastDistance} cm > ${DFREE} cm")
+            } 
+            else {
+                ContainerCounter = maxOf(ContainerCounter - 1, 0)
+                FaultCounter = maxOf(FaultCounter - 1, 0)
+                println("sonar | Pedana libera/zona intermedia: D=${lastDistance} cm")
+            }
+        }
+    #]
+}
+Goto emit_event_recovery if [# justRecovered #] else check_normal_flow
+
+State check_normal_flow {
 }
 Goto emit_event_container if [# ContainerCounter >= STABLE_READINGS #] else check_fault_emit
 
@@ -589,8 +643,15 @@ Goto idle
 
 State emit_event_fault {
     println("sonar | GUASTO SENSORE CONFERMATO PER 3s (D=${lastDistance} cm > ${DFREE}cm)! Emetto sonar_fault") color red
-    [# ContainerCounter = 0; FaultCounter = 0 #]
+    [# ContainerCounter = 0; FaultCounter = 0; isFaulted = true #]
     emit sonar_fault : sonarFault(none)
+}
+Goto idle
+
+State emit_event_recovery {
+    println("sonar | 🟢 PEDANA RILEVATA (D=${lastDistance} cm < ${DFREE}cm) DOPO GUASTO! Emetto sonar_recovered") color green
+    [# ContainerCounter = 0; FaultCounter = 0; isFaulted = false; justRecovered = false #]
+    emit sonar_recovered : sonarRecovered(none)
 }
 Goto idle
 

@@ -49,7 +49,7 @@ class Led ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isdy
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t031",targetState="handle_initial_blink",cond=whenDispatch("led_blink"))
+					 transition(edgeName="t034",targetState="handle_initial_blink",cond=whenDispatch("led_blink"))
 				}	 
 				state("handle_initial_blink") { //this:State
 					action { //it:State
@@ -77,7 +77,7 @@ class Led ( name: String, scope: CoroutineScope, isconfined: Boolean=false, isdy
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition(edgeName="t132",targetState="handle_toggle",cond=whenDispatch("led_blink"))
+					 transition(edgeName="t135",targetState="handle_toggle",cond=whenDispatch("led_blink"))
 				}	 
 				state("handle_toggle") { //this:State
 					action { //it:State
