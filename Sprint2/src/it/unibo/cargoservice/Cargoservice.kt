@@ -57,8 +57,8 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 					sysaction { //it:State
 					}	 	 
 					 transition(edgeName="t06",targetState="handle_load_request",cond=whenRequest("load_request"))
-					transition(edgeName="t07",targetState="mark_out_of_service",cond=whenEvent("sonar_fault"))
-					transition(edgeName="t08",targetState="clear_out_of_service",cond=whenEvent("sonar_recovered"))
+					transition(edgeName="t07",targetState="mark_out_of_service",cond=whenDispatch("sonar_fault"))
+					transition(edgeName="t08",targetState="clear_out_of_service",cond=whenDispatch("sonar_recovered"))
 				}	 
 				state("mark_out_of_service") { //this:State
 					action { //it:State
@@ -181,7 +181,7 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 				 	 					  scope, context!!, "local_tout_"+name+"_engaged", 30000.toLong() )  //OCT2023
 					}	 	 
 					 transition(edgeName="t211",targetState="handle_timeout",cond=whenTimeout("local_tout_"+name+"_engaged"))   
-					transition(edgeName="t212",targetState="container_arrived",cond=whenEvent("container_detected"))
+					transition(edgeName="t212",targetState="container_arrived",cond=whenDispatch("container_detected"))
 				}	 
 				state("handle_timeout") { //this:State
 					action { //it:State
@@ -212,7 +212,7 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 				}	 
 				state("container_arrived") { //this:State
 					action { //it:State
-						CommUtils.outgreen("cargoservice | Container detected via Sonar Event - requesting robot to IOPort")
+						CommUtils.outgreen("cargoservice | Container detected via Sonar Dispatch - requesting robot to IOPort")
 						 mqtt.publish("cargo/display/msg", "Container rilevato! Robot in movimento...")  
 						request("robot_to_ioport", "robotToIoport(none)" ,"cargorobot" )  
 						//genTimer( actor, state )
@@ -281,7 +281,6 @@ class Cargoservice ( name: String, scope: CoroutineScope, isconfined: Boolean=fa
 						        CurrentSlot = ""
 						        mqtt.publish("cargo/display/msg", "Stivaggio completato in $SlotSend!")
 						CommUtils.outgreen("cargoservice | transfer completed and slot occupied")
-						emit("robot_complete_notification", "robotCompleteNotif($SlotSend)" ) 
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002

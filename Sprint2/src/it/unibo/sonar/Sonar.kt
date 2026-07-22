@@ -92,7 +92,7 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition( edgeName="goto",targetState="emit_event_recovery", cond=doswitchGuarded({ justRecovered  
+					 transition( edgeName="goto",targetState="event_recovery", cond=doswitchGuarded({ justRecovered  
 					}) )
 					transition( edgeName="goto",targetState="check_normal_flow", cond=doswitchGuarded({! ( justRecovered  
 					) }) )
@@ -104,28 +104,28 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition( edgeName="goto",targetState="emit_event_container", cond=doswitchGuarded({ ContainerCounter >= STABLE_READINGS  
+					 transition( edgeName="goto",targetState="event_container", cond=doswitchGuarded({ ContainerCounter >= STABLE_READINGS  
 					}) )
-					transition( edgeName="goto",targetState="check_fault_emit", cond=doswitchGuarded({! ( ContainerCounter >= STABLE_READINGS  
+					transition( edgeName="goto",targetState="check_fault", cond=doswitchGuarded({! ( ContainerCounter >= STABLE_READINGS  
 					) }) )
 				}	 
-				state("check_fault_emit") { //this:State
+				state("check_fault") { //this:State
 					action { //it:State
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
 					sysaction { //it:State
 					}	 	 
-					 transition( edgeName="goto",targetState="emit_event_fault", cond=doswitchGuarded({ FaultCounter >= STABLE_READINGS  
+					 transition( edgeName="goto",targetState="event_fault", cond=doswitchGuarded({ FaultCounter >= STABLE_READINGS  
 					}) )
 					transition( edgeName="goto",targetState="idle", cond=doswitchGuarded({! ( FaultCounter >= STABLE_READINGS  
 					) }) )
 				}	 
-				state("emit_event_container") { //this:State
+				state("event_container") { //this:State
 					action { //it:State
-						CommUtils.outgreen("sonar | CONTAINER CONFERMATO STABILE PER 3s (D=${lastDistance} cm < ${DETECT_THRESHOLD}cm)! Emetto container_detected")
+						CommUtils.outgreen("sonar | CONTAINER CONFERMATO STABILE PER 3s (D=${lastDistance} cm < ${DETECT_THRESHOLD}cm)! Invio container_detected a cargoservice")
 						 ContainerCounter = 0; FaultCounter = 0  
-						emit("container_detected", "containerDetected(none)" ) 
+						forward("container_detected", "containerDetected(none)" ,"cargoservice" ) 
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
@@ -133,11 +133,11 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 					}	 	 
 					 transition( edgeName="goto",targetState="idle", cond=doswitch() )
 				}	 
-				state("emit_event_fault") { //this:State
+				state("event_fault") { //this:State
 					action { //it:State
-						CommUtils.outred("sonar | GUASTO SENSORE CONFERMATO PER 3s (D=${lastDistance} cm > ${DFREE}cm)! Emetto sonar_fault")
+						CommUtils.outred("sonar | GUASTO SENSORE CONFERMATO PER 3s (D=${lastDistance} cm > ${DFREE}cm)! Invio sonar_fault a cargoservice")
 						 ContainerCounter = 0; FaultCounter = 0; isFaulted = true  
-						emit("sonar_fault", "sonarFault(none)" ) 
+						forward("sonar_fault", "sonarFault(none)" ,"cargoservice" ) 
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
@@ -145,11 +145,11 @@ class Sonar ( name: String, scope: CoroutineScope, isconfined: Boolean=false, is
 					}	 	 
 					 transition( edgeName="goto",targetState="idle", cond=doswitch() )
 				}	 
-				state("emit_event_recovery") { //this:State
+				state("event_recovery") { //this:State
 					action { //it:State
-						CommUtils.outgreen("sonar | 🟢 PEDANA RILEVATA (D=${lastDistance} cm < ${DFREE}cm) DOPO GUASTO! Emetto sonar_recovered")
+						CommUtils.outgreen("sonar | 🟢 PEDANA RILEVATA (D=${lastDistance} cm < ${DFREE}cm) DOPO GUASTO! Invio sonar_recovered a cargoservice")
 						 ContainerCounter = 0; FaultCounter = 0; isFaulted = false; justRecovered = false  
-						emit("sonar_recovered", "sonarRecovered(none)" ) 
+						forward("sonar_recovered", "sonarRecovered(none)" ,"cargoservice" ) 
 						//genTimer( actor, state )
 					}
 					//After Lenzi Aug2002
