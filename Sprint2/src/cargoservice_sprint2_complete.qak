@@ -98,6 +98,10 @@ QActor hold context ctxcargo {
 
 State s0 initial { 
     println("hold | avviato") color blue
+    [#
+        val holdStatusJson = slots.entries.joinToString(",", "{", "}") { "\"${it.key}\":\"${it.value}\"" }
+        mqtt.publish("cargo/hold/status", holdStatusJson)
+    #]
 }
 Goto idle
 
@@ -171,6 +175,8 @@ State occupy_slot {
             slots[SlotToOccupy] = "occupied" 
             val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
             mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
+            val holdStatusJson = slots.entries.joinToString(",", "{", "}") { "\"${it.key}\":\"${it.value}\"" }
+            mqtt.publish("cargo/hold/status", holdStatusJson)
         #]
         println("hold | $SlotToOccupy ora OCCUPATO") color green
     } else {
@@ -187,6 +193,8 @@ State free_slot {
             slots[SlotToRelease] = "free" 
             val holdStatus = slots.entries.joinToString(", ") { "${it.key}=${it.value}" }
             mqtt.publish("cargo/display/msg", "Hold: $holdStatus")
+            val holdStatusJson = slots.entries.joinToString(",", "{", "}") { "\"${it.key}\":\"${it.value}\"" }
+            mqtt.publish("cargo/hold/status", holdStatusJson)
         #]
         println("hold | Rilasciato $SlotToRelease") color yellow
         replyTo find_release with release_done : releaseSlotDone(none)
@@ -463,7 +471,7 @@ State move_to_final_slot {
         [#
             TargetX = payloadArg(0).toInt()
             TargetY = payloadArg(1).toInt()
-            TargetX_forRelease = TargetX - 1
+            TargetX_forRelease = TargetX + 1
         #]
     }
     println("cargorobot | Spostamento verso ($TargetX_forRelease,$TargetY)") color magenta
