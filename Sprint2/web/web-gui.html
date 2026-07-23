@@ -59,6 +59,15 @@
                 <span class="text-xs text-slate-400 mt-3 font-semibold">Pulsante di Richiesta Carico (Pushbutton)</span>
             </div>
 
+            <!-- Pannello stato Hold (persistente, aggiornato via topic cargo/hold/status) -->
+            <div class="bg-slate-950/40 border border-slate-800/80 rounded-xl p-4">
+                <div class="text-xs text-slate-400 uppercase tracking-wider mb-3 font-sans font-bold">Stato Hold (Stiva)</div>
+                <div id="holdSlotsGrid" class="grid grid-cols-4 gap-2">
+                    <!-- Le celle degli slot vengono generate dinamicamente da JS -->
+                    <div class="hold-slot-placeholder text-center text-[10px] text-slate-600 col-span-4 py-2">In attesa di dati dalla hold...</div>
+                </div>
+            </div>
+
         </div>
 
         <div class="p-4 bg-slate-950 border-t border-slate-800/80 font-mono text-[10px]">
@@ -121,17 +130,20 @@
                     btn.querySelectorAll('span')[1].innerText = "REQUEST";
                     btn.querySelectorAll('span')[1].className = "text-rose-200 text-[10px] font-semibold mt-0.5";
 
-                    //sottoscrizioni ai topic di display e stato
+                    // sottoscrizioni ai topic di display e stato
                     client.subscribe('cargo/display/msg');  // ascolta messaggi di display
+                    client.subscribe('cargo/hold/status');  // ascolta lo stato corrente della hold (slot liberi/occupati)
                 });
                 
                 client.on('message', function (topic, message) {
                     const payload = message.toString();
                     appendLog(`[${topic}] ${payload}`, "text-slate-400");
                     
-                    //routing per topic di display
+                    // TRouting per topic di display
                     if (topic === 'cargo/display/msg') {
                         handleDisplayMessage(payload);
+                    } else if (topic === 'cargo/hold/status') {
+                        handleHoldStatus(payload);
                     } else {
                         parseIncomingMessage(payload);
                     }
@@ -151,11 +163,46 @@
             }
         }
 
-        // ←  : gestione messaggi di display dal QActor display
+        // Gestione messaggi di display dal QActor display
         function handleDisplayMessage(payload) {
             // Il payload è il messaggio grezzo dal sonar (es: "Out of service - Sensore guasto")
             setDisplayText(payload);
             appendLog(`[DISPLAY UPDATE] ${payload}`, "text-sky-300");
+        }
+
+        // Gestione dello stato della Hold: il QActor "hold" pubblica su cargo/hold/status
+        // un JSON tipo {"slot1":"free","slot2":"occupied","slot3":"free","slot4":"free"}
+        // ogni volta che uno slot viene occupato o rilasciato (occupy_slot / free_slot),
+        // e una volta all'avvio (state s0 initial). Questo pannello resta persistente
+        // e non viene sovrascritto dai messaggi transitori su cargo/display/msg.
+        function handleHoldStatus(payload) {
+            let slots;
+            try {
+                slots = JSON.parse(payload);
+            } catch (e) {
+                appendLog(`[HOLD STATUS] Payload non valido: ${payload}`, "text-rose-500");
+                return;
+            }
+
+            const grid = document.getElementById('holdSlotsGrid');
+            grid.innerHTML = '';
+
+            Object.entries(slots).forEach(([slotId, state]) => {
+                const isFree = state === 'free';
+                const cell = document.createElement('div');
+                cell.className = `flex flex-col items-center justify-center rounded-lg py-3 border font-mono transition-colors ${
+                    isFree
+                        ? 'bg-emerald-950/40 border-emerald-700 text-emerald-400'
+                        : 'bg-rose-950/40 border-rose-700 text-rose-400'
+                }`;
+                cell.innerHTML = `
+                    <span class="text-[10px] uppercase tracking-wider font-sans font-bold opacity-80">${slotId}</span>
+                    <span class="text-xs font-bold mt-1">${isFree ? 'LIBERO' : 'OCCUPATO'}</span>
+                `;
+                grid.appendChild(cell);
+            });
+
+            appendLog(`[HOLD STATUS] ${payload}`, "text-violet-300");
         }
 
         function buildQakMessage(msgId, msgType, sender, receiver, content) {
